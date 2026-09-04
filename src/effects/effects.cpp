@@ -5,6 +5,65 @@
 #include "display/gu_display.h"
 
 namespace effects {
+
+void State::reset() {
+  step = 0;
+  call = 0;
+  aux0 = 0;
+  aux1 = 0;
+  for (auto &b : data) b = 0;
+}
+
+namespace {
+ModeFn g_table[static_cast<size_t>(Id::kCount)] = {nullptr};
+}  // namespace
+
+void register_mode(Id id, ModeFn fn) { g_table[static_cast<size_t>(id)] = fn; }
+
+// Display names, real WLED's exactly, indexed by Id (see effects.h's top
+// comment for why the numbering matches real WLED and why unimplemented
+// IDs say "RSVD" specifically). Source: wled/WLED's wled00/FX.cpp's
+// per-effect `_data_FX_MODE_*` strings (the part before the first '@').
+constexpr const char *kNames[static_cast<size_t>(Id::kCount)] = {
+    "Solid", "Blink", "Breathe", "Wipe", "Wipe Random", "Random Colors", "Sweep", "Dynamic",
+    "Colorloop", "Rainbow", "Scan", "Scan Dual", "Fade", "Theater", "Theater Rainbow", "Running",
+    "Saw", "Twinkle", "Dissolve", "Dissolve Rnd", "Sparkle", "Sparkle Dark", "Sparkle+", "Strobe",
+    "Strobe Rainbow", "Strobe Mega", "Blink Rainbow", "Android", "Chase", "Chase Random",
+    "Chase Rainbow", "Chase Flash", "Chase Flash Rnd", "Rainbow Runner", "Colorful",
+    "Traffic Light", "Sweep Random", "Chase 2", "Aurora", "Stream", "Scanner", "Lighthouse",
+    "Fireworks", "Rain", "Tetrix", "Fire Flicker", "Gradient", "Loading", "Rolling Balls",
+    "Fairy", "Two Dots", "Fairytwinkle", "Running Dual", "Image", "Chase 3", "Tri Wipe",
+    "Tri Fade", "Lightning", "ICU", "Multi Comet", "Scanner Dual", "Stream 2", "Oscillate",
+    "Pride 2015", "Juggle", "Palette", "Fire 2012", "Colorwaves", "Bpm", "Fill Noise", "Noise 1",
+    "Noise 2", "Noise 3", "Noise 4", "Colortwinkles", "Lake", "Meteor", "Copy Segment", "Railway",
+    "Ripple", "Twinklefox", "Twinklecat", "Halloween Eyes", "Solid Pattern",
+    "Solid Pattern Tri", "Spots", "Spots Fade", "Glitter", "Candle", "Fireworks Starburst",
+    "Fireworks 1D", "Bouncing Balls", "Sinelon", "Sinelon Dual", "Sinelon Rainbow", "Popcorn",
+    "Drip", "Plasma", "Percent", "Ripple Rainbow", "Heartbeat", "Pacifica", "Candle Multi",
+    "Solid Glitter", "Sunrise", "Phased", "Twinkleup", "Noise Pal", "Sine", "Phased Noise",
+    "Flow", "Chunchun", "Dancing Shadows", "Washing Machine", "Rotozoomer", "Blends",
+    "TV Simulator", "Dynamic Smooth", "Spaceships", "Crazy Bees", "Ghost Rider", "Blobs",
+    "Scrolling Text", "Drift Rose", "Distortion Waves", "Soap", "Octopus", "Waving Cell",
+    "Pixels", "Pixelwave", "Juggles", "Matripix", "Gravimeter", "Plasmoid", "Puddles",
+    "Midnoise", "Noisemeter", "Freqwave", "Freqmatrix", "GEQ", "Waterfall", "Freqpixels",
+    "RSVD", "Noisefire", "Puddlepeak", "Noisemove", "Noise2D", "Perlin Move", "Ripple Peak",
+    "Firenoise", "Squared Swirl", "PacMan", "DNA", "Matrix", "Metaballs", "Freqmap",
+    "Gravcenter", "Gravcentric", "Gravfreq", "DJ Light", "Funky Plank", "Shimmer", "Pulser",
+    "Blurz", "Drift", "Waverly", "Sun Radiation", "Colored Bursts", "Julia", "RSVD", "RSVD",
+    "RSVD", "Game Of Life", "Tartan", "Polar Lights", "Swirl", "Lissajous", "Frizzles",
+    "Plasma Ball", "Flow Stripe", "Hiphotic", "Sindots", "DNA Spiral", "Black Hole", "Wavesins",
+    "Rocktaves", "Akemi", "PS Volcano", "PS Fire", "PS Fireworks", "PS Vortex", "PS Fuzzy Noise",
+    "PS Ballpit", "PS Box", "PS Attractor", "PS Impact", "PS Waterfall", "PS Spray",
+    "PS GEQ 2D", "PS GEQ Nova", "PS Ghost Rider", "PS Blobs", "PS DripDrop", "PS Pinball",
+    "PS Dancing Shadows", "PS Fireworks 1D", "PS Sparkler", "PS Hourglass", "PS Spray 1D",
+    "PS 1D Balance", "PS Chase", "PS Starburst", "PS GEQ 1D", "PS Fire 1D", "PS Sonic Stream",
+    "PS Sonic Boom", "PS Springy", "PS Galaxy", "Color Clouds", "Slow Transition",
+};
+static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Id::kCount),
+              "kNames must have one entry per Id");
+
+const char *name(Id id) { return kNames[static_cast<size_t>(id)]; }
+
 namespace {
 
 uint8_t clamp_u8(int v) {
@@ -41,16 +100,22 @@ Rgb color_wheel(uint8_t pos) {
              clamp_u8(static_cast<int>(bp * 255))};
 }
 
-// wled00/FX.cpp:136 mode_static() - SEGMENT.fill(SEGCOLOR(0))
-void solid(uint32_t, const Params &p, Rgb *out, int width) {
-  for (int i = 0; i < width; i++) out[i] = p.primary;
+void fill_column(Frame frame, int x, const Rgb &c) {
+  for (int y = 0; y < GuDisplay::HEIGHT; y++) frame[y][x] = c;
 }
+
+// wled00/FX.cpp:136 mode_static() - SEGMENT.fill(SEGCOLOR(0))
+void mode_static(uint32_t, const Params &p, State &, Frame frame) {
+  for (int x = 0; x < GuDisplay::WIDTH; x++) fill_column(frame, x, p.primary);
+}
+EFFECTS_REGISTER(Id::kStatic, mode_static)
 
 // wled00/FX.cpp:262 color_wipe(rev=false, useRandomColors=false), as used
 // by mode_color_wipe(). The useRandomColors branch (SEGENV.step/aux0/aux1)
 // is dropped since our default wipe never takes it - everything else,
 // including the ledIndex/rem timing math, is unchanged.
-void wipe(uint32_t now_ms, const Params &p, Rgb *out, int width) {
+void mode_color_wipe(uint32_t now_ms, const Params &p, State &, Frame frame) {
+  constexpr int width = GuDisplay::WIDTH;
   uint32_t cycle_time = 750 + (255 - p.speed) * 150;
   uint32_t perc = now_ms % cycle_time;
   uint32_t prog = (perc * 65535) / cycle_time;
@@ -73,25 +138,28 @@ void wipe(uint32_t now_ms, const Params &p, Rgb *out, int width) {
                     static_cast<uint8_t>(rem));
       }
     }
-    out[i] = px;
+    fill_column(frame, i, px);
   }
 }
+EFFECTS_REGISTER(Id::kColorWipe, mode_color_wipe)
 
 // wled00/FX.cpp:530 mode_rainbow_cycle()
-void rainbow(uint32_t now_ms, const Params &p, Rgb *out, int width) {
+void mode_rainbow_cycle(uint32_t now_ms, const Params &p, State &, Frame frame) {
+  constexpr int width = GuDisplay::WIDTH;
   uint32_t counter = (now_ms * ((p.speed >> 2) + 2)) & 0xFFFFu;
   counter >>= 8;
   for (int i = 0; i < width; i++) {
     uint8_t index = static_cast<uint8_t>(
         (static_cast<uint32_t>(i) * (16u << (p.intensity / 29)) / width) + counter);
-    out[i] = color_wheel(index);
+    fill_column(frame, i, color_wheel(index));
   }
 }
+EFFECTS_REGISTER(Id::kRainbowCycle, mode_rainbow_cycle)
 
 // wled00/FX.cpp:432 mode_breath(). sin16_t (WLED/FastLED's Q15 fixed-point
 // sine, input 0-65535 -> output roughly -32767..32767) is replaced with
 // sinf() over the same domain - matches the shape, not bit-exact.
-void breathe(uint32_t now_ms, const Params &p, Rgb *out, int width) {
+void mode_breath(uint32_t now_ms, const Params &p, State &, Frame frame) {
   uint32_t counter = (now_ms * ((p.speed >> 3) + 10)) & 0xFFFFu;
   counter = (counter >> 2) + (counter >> 4);  // 0-16384 + 0-2048
 
@@ -104,38 +172,43 @@ void breathe(uint32_t now_ms, const Params &p, Rgb *out, int width) {
   uint8_t lum = clamp_u8(30 + var);
 
   Rgb color = blend(p.secondary, p.primary, lum);
-  for (int i = 0; i < width; i++) out[i] = color;
+  for (int x = 0; x < GuDisplay::WIDTH; x++) fill_column(frame, x, color);
 }
+EFFECTS_REGISTER(Id::kBreath, mode_breath)
 
 }  // namespace
 
-void render(Id id, GuDisplay &display, uint32_t now_ms, const Params &params) {
-  Rgb columns[GuDisplay::WIDTH];
+void render(Id id, GuDisplay &display, uint32_t now_ms, const Params &params, State &state) {
+  static Rgb frame[GuDisplay::HEIGHT][GuDisplay::WIDTH];
 
-  switch (id) {
-    case Id::kSolid:   solid(now_ms, params, columns, GuDisplay::WIDTH); break;
-    case Id::kWipe:    wipe(now_ms, params, columns, GuDisplay::WIDTH); break;
-    case Id::kRainbow: rainbow(now_ms, params, columns, GuDisplay::WIDTH); break;
-    case Id::kBreathe: breathe(now_ms, params, columns, GuDisplay::WIDTH); break;
-    default:           solid(now_ms, params, columns, GuDisplay::WIDTH); break;
+  // `frame` is one shared buffer reused across every effect (state.reset()
+  // only zeroes State::data, not this) - effects that read-then-fade their
+  // own previous frame (trails, sparkle decay) need a genuinely blank
+  // canvas the moment they're selected, not whatever the last effect left
+  // behind. Matches real WLED's segment pixel buffer starting blank.
+  if (state.call == 0) {
+    for (auto &row : frame)
+      for (auto &px : row) px = Rgb{0, 0, 0};
   }
 
-  for (int x = 0; x < GuDisplay::WIDTH; x++) {
-    const Rgb &c = columns[x];
-    for (int y = 0; y < GuDisplay::HEIGHT; y++) {
+  ModeFn fn = g_table[static_cast<size_t>(id)];
+  if (fn) {
+    fn(now_ms, params, state, frame);
+  } else {
+    // No ported effect for this ID yet (or it's a real WLED "RSVD" slot) -
+    // fall back to Solid rather than showing whatever the previous effect
+    // left in the frame buffer.
+    for (int x = 0; x < GuDisplay::WIDTH; x++) fill_column(frame, x, params.primary);
+  }
+
+  for (int y = 0; y < GuDisplay::HEIGHT; y++) {
+    for (int x = 0; x < GuDisplay::WIDTH; x++) {
+      const Rgb &c = frame[y][x];
       display.set_pixel(x, y, c.r, c.g, c.b);
     }
   }
-}
 
-const char *name(Id id) {
-  switch (id) {
-    case Id::kSolid:   return "Solid";
-    case Id::kWipe:    return "Wipe";
-    case Id::kRainbow: return "Rainbow";
-    case Id::kBreathe: return "Breathe";
-    default:           return "?";
-  }
+  state.call++;
 }
 
 }  // namespace effects

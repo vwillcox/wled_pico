@@ -44,12 +44,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
 <input type="range" min="1" max="255" id="bri">
 
 <label>Effect</label>
-<select id="fx">
-  <option value="0">Solid</option>
-  <option value="1">Wipe</option>
-  <option value="2">Rainbow</option>
-  <option value="3">Breathe</option>
-</select>
+<select id="fx"></select>
 
 <label>Speed <span id="sxVal"></span></label>
 <input type="range" min="0" max="255" id="sx">
@@ -244,8 +239,23 @@ document.getElementById('staForget').addEventListener('click', async () => {
 });
 refreshStaStatus();
 
-connectWs();
-fetch('/json/state').then(r => r.json()).then(applyToUI);
+// Effect IDs now match real WLED's numbering (see src/effects/effects.h),
+// so they're sparse and not implemented for every ID - populate the
+// dropdown from /json/eff rather than hardcoding options, same as any real
+// WLED UI would, skipping "RSVD" (real WLED's own name for an ID with no
+// effect - see effects.h for why).
+fetch('/json/eff').then(r => r.json()).then(names => {
+  const fx = document.getElementById('fx');
+  names.forEach((n, i) => {
+    if (n === 'RSVD') return;
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = n;
+    fx.appendChild(opt);
+  });
+  connectWs();
+  fetch('/json/state').then(r => r.json()).then(applyToUI);
+});
 </script>
 </body>
 </html>

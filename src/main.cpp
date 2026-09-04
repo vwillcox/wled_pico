@@ -94,7 +94,7 @@ void loop() {
   if (realtime.active()) {
     realtime.render(display);
   } else {
-    effects::render(api.effect_id(), display, millis(), api.effect_params());
+    effects::render(api.effect_id(), display, millis(), api.effect_params(), api.effect_state());
   }
 
   delay(16);  // ~60 updates/sec; PIO/DMA scan itself runs at ~300fps independent of this

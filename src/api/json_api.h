@@ -29,6 +29,7 @@ class JsonApi {
   uint8_t brightness() const { return bri_; }
   effects::Id effect_id() const { return effect_id_; }
   const effects::Params &effect_params() const { return params_; }
+  effects::State &effect_state() { return state_; }
 
   // main.cpp calls this every loop() iteration with RealtimeUdp::active() -
   // JsonApi reports it back out as info.live so real WLED clients (the app,
@@ -39,8 +40,9 @@ class JsonApi {
  private:
   bool on_ = true;
   uint8_t bri_ = 128;
-  effects::Id effect_id_ = effects::Id::kRainbow;
+  effects::Id effect_id_ = effects::Id::kRainbowCycle;
   effects::Params params_;
+  effects::State state_;
   int current_preset_ = -1;
   bool live_ = false;
 
@@ -50,6 +52,7 @@ class JsonApi {
   void serialize_state(JsonObject root) const;
   void serialize_info(JsonObject root) const;
   void serialize_effects(JsonArray arr) const;
+  void serialize_palettes(JsonArray arr) const;
 
   // Applies on/bri/seg[0].{fx,sx,ix,col} from `root`, then handles
   // WLED's psave/ps/pdel preset fields (which need the *result* of that

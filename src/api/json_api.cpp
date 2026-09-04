@@ -6,11 +6,11 @@
 #include <WiFi.h>
 
 #include "display/gu_display.h"
+#include "effects/palettes.h"
 #include "net/device_id.h"
 
 namespace {
-constexpr const char *kEffectNames[] = {"Solid", "Wipe", "Rainbow", "Breathe"};
-constexpr size_t kEffectCount = sizeof(kEffectNames) / sizeof(kEffectNames[0]);
+constexpr size_t kEffectCount = static_cast<size_t>(effects::Id::kCount);
 constexpr int kPixelCount = GuDisplay::WIDTH * GuDisplay::HEIGHT;
 }  // namespace
 
@@ -59,7 +59,13 @@ void JsonApi::serialize_state(JsonObject root) const {
   seg["fx"] = static_cast<int>(effect_id_);
   seg["sx"] = params_.speed;
   seg["ix"] = params_.intensity;
-  seg["pal"] = 0;
+  seg["c1"] = params_.custom1;
+  seg["c2"] = params_.custom2;
+  seg["c3"] = params_.custom3;
+  seg["o1"] = params_.option1;
+  seg["o2"] = params_.option2;
+  seg["o3"] = params_.option3;
+  seg["pal"] = params_.palette_id;
   seg["sel"] = true;
 
   JsonArray col = seg["col"].to<JsonArray>();
@@ -68,7 +74,7 @@ void JsonApi::serialize_state(JsonObject root) const {
   JsonArray c1 = col.add<JsonArray>();
   c1.add(params_.secondary.r); c1.add(params_.secondary.g); c1.add(params_.secondary.b);
   JsonArray c2 = col.add<JsonArray>();
-  c2.add(0); c2.add(0); c2.add(0);
+  c2.add(params_.tertiary.r); c2.add(params_.tertiary.g); c2.add(params_.tertiary.b);
 }
 
 // wled00/json.cpp's serializeInfo(), trimmed to fields worth having for a
@@ -106,7 +112,7 @@ void JsonApi::serialize_info(JsonObject root) const {
   root["lip"] = "";
   root["ws"] = static_cast<int>(ws_.count());
   root["fxcount"] = kEffectCount;
-  root["palcount"] = 1;
+  root["palcount"] = effects::kPaletteCount;
   root["freeheap"] = rp2040.getFreeHeap();
   root["uptime"] = millis() / 1000;
 
@@ -129,7 +135,11 @@ void JsonApi::serialize_info(JsonObject root) const {
 }
 
 void JsonApi::serialize_effects(JsonArray arr) const {
-  for (size_t i = 0; i < kEffectCount; i++) arr.add(kEffectNames[i]);
+  for (size_t i = 0; i < kEffectCount; i++) arr.add(effects::name(static_cast<effects::Id>(i)));
+}
+
+void JsonApi::serialize_palettes(JsonArray arr) const {
+  for (int i = 0; i < effects::kPaletteCount; i++) arr.add(effects::palette_name(static_cast<uint8_t>(i)));
 }
 
 // wled00/json.cpp's deserializeState()/deserializeSegment(), trimmed the
@@ -150,10 +160,20 @@ void JsonApi::apply_state(JsonObjectConst root) {
 
     if (seg["fx"].is<int>()) {
       int fx = seg["fx"].as<int>();
-      if (fx >= 0 && fx < static_cast<int>(kEffectCount)) effect_id_ = static_cast<effects::Id>(fx);
+      if (fx >= 0 && fx < static_cast<int>(kEffectCount) && static_cast<effects::Id>(fx) != effect_id_) {
+        effect_id_ = static_cast<effects::Id>(fx);
+        state_.reset();  // matches WLED zeroing SEGENV on a mode switch
+      }
     }
     if (seg["sx"].is<int>()) params_.speed = static_cast<uint8_t>(seg["sx"].as<int>());
     if (seg["ix"].is<int>()) params_.intensity = static_cast<uint8_t>(seg["ix"].as<int>());
+    if (seg["c1"].is<int>()) params_.custom1 = static_cast<uint8_t>(seg["c1"].as<int>());
+    if (seg["c2"].is<int>()) params_.custom2 = static_cast<uint8_t>(seg["c2"].as<int>());
+    if (seg["c3"].is<int>()) params_.custom3 = static_cast<uint8_t>(seg["c3"].as<int>());
+    if (seg["o1"].is<bool>()) params_.option1 = seg["o1"].as<bool>();
+    if (seg["o2"].is<bool>()) params_.option2 = seg["o2"].as<bool>();
+    if (seg["o3"].is<bool>()) params_.option3 = seg["o3"].as<bool>();
+    if (seg["pal"].is<int>()) params_.palette_id = static_cast<uint8_t>(seg["pal"].as<int>());
 
     JsonArrayConst col = seg["col"];
     if (!col.isNull()) {
@@ -171,6 +191,14 @@ void JsonApi::apply_state(JsonObjectConst root) {
           params_.secondary = {static_cast<uint8_t>(c[0].as<int>()),
                                 static_cast<uint8_t>(c[1].as<int>()),
                                 static_cast<uint8_t>(c[2].as<int>())};
+        }
+      }
+      if (col.size() > 2 && !col[2].isNull()) {
+        JsonArrayConst c = col[2];
+        if (c.size() >= 3) {
+          params_.tertiary = {static_cast<uint8_t>(c[0].as<int>()),
+                               static_cast<uint8_t>(c[1].as<int>()),
+                               static_cast<uint8_t>(c[2].as<int>())};
         }
       }
     }
@@ -270,8 +298,12 @@ void JsonApi::begin(AsyncWebServer &server) {
   server.on("/json/effects", HTTP_GET, serve_effects);
   server.on("/json/eff", HTTP_GET, serve_effects);
 
-  auto serve_palettes = [](AsyncWebServerRequest *request) {
-    request->send(200, "application/json", "[\"Default\"]");
+  auto serve_palettes = [this](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    serialize_palettes(doc.to<JsonArray>());
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    request->send(response);
   };
   server.on("/json/palettes", HTTP_GET, serve_palettes);
   server.on("/json/pal", HTTP_GET, serve_palettes);
@@ -299,8 +331,7 @@ void JsonApi::begin(AsyncWebServer &server) {
     serialize_state(root["state"].to<JsonObject>());
     serialize_info(root["info"].to<JsonObject>());
     serialize_effects(root["effects"].to<JsonArray>());
-    JsonArray palettes = root["palettes"].to<JsonArray>();
-    palettes.add("Default");
+    serialize_palettes(root["palettes"].to<JsonArray>());
     AsyncResponseStream *response = request->beginResponseStream("application/json");
     serializeJson(doc, *response);
     request->send(response);
