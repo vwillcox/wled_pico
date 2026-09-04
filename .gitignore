@@ -1,0 +1,3 @@
+.pio/
+.venv/
+src/wifi_creds_debug.h
