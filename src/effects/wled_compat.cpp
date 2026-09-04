@@ -5,6 +5,30 @@
 
 namespace effects {
 
+namespace {
+uint8_t clamp_u8(int v) {
+  if (v < 0) return 0;
+  if (v > 255) return 255;
+  return static_cast<uint8_t>(v);
+}
+}  // namespace
+
+Rgb blend(const Rgb &a, const Rgb &b, uint8_t amount) {
+  return Rgb{
+      clamp_u8(a.r + (static_cast<int>(b.r) - a.r) * amount / 255),
+      clamp_u8(a.g + (static_cast<int>(b.g) - a.g) * amount / 255),
+      clamp_u8(a.b + (static_cast<int>(b.b) - a.b) * amount / 255),
+  };
+}
+
+void fade_to_black_by(Frame frame, uint8_t fade_amount) {
+  for (int y = 0; y < GuDisplay::HEIGHT; y++) {
+    for (int x = 0; x < GuDisplay::WIDTH; x++) {
+      frame[y][x] = blend(frame[y][x], Rgb{0, 0, 0}, fade_amount);
+    }
+  }
+}
+
 uint8_t random8() { return static_cast<uint8_t>(rp2040.hwrand32()); }
 uint8_t random8(uint8_t max) { return max ? static_cast<uint8_t>(rp2040.hwrand32() % max) : 0; }
 uint8_t random8(uint8_t min, uint8_t max) { return max > min ? static_cast<uint8_t>(min + random8(static_cast<uint8_t>(max - min))) : min; }

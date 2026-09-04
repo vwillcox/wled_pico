@@ -298,6 +298,13 @@ struct State {
 // color down an entire column; a 2D-native one addresses (x,y) directly.
 using Frame = Rgb[GuDisplay::HEIGHT][GuDisplay::WIDTH];
 
+// Writes `c` down every row of column `x` - the broadcast every de facto
+// 1D effect (the majority of what's ported here) needs, now that each one
+// addresses the full 2D `frame` instead of a 32-wide columns[] array.
+inline void fill_column(Frame frame, int x, Rgb c) {
+  for (int y = 0; y < GuDisplay::HEIGHT; y++) frame[y][x] = c;
+}
+
 using ModeFn = void (*)(uint32_t now_ms, const Params &params, State &state, Frame frame);
 
 // Registers `fn` as the renderer for effect `id` - real WLED's addEffect(),

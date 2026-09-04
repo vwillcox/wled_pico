@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "effects.h"
+
 // A small subset of FastLED/WLED's 8/16-bit math and PRNG helpers - almost
 // every WLED mode_ function calls at least one of these (random8/sin8/
 // beatsin8 especially). Not bit-exact against FastLED's actual lookup
@@ -35,6 +37,15 @@ uint8_t beatsin8(uint32_t now_ms, uint8_t bpm, uint8_t low = 0, uint8_t high = 2
                   uint16_t phase_offset = 0);
 uint16_t beatsin16(uint32_t now_ms, uint8_t bpm, uint16_t low = 0, uint16_t high = 65535,
                     uint16_t phase_offset = 0);
+
+// WLED's color_blend(c1, c2, amount): blend from a to b by amount/255.
+// wled00/FX_fcn.cpp
+Rgb blend(const Rgb &a, const Rgb &b, uint8_t amount);
+
+// WLED's fadeToBlackBy()/fade_out(): darkens every pixel in `frame` toward
+// black by `fade_amount`/255 - the "afterglow" most trail/sparkle-decay
+// effects use instead of clearing the frame outright each call.
+void fade_to_black_by(Frame frame, uint8_t fade_amount);
 
 inline uint8_t qadd8(uint8_t a, uint8_t b) {
   unsigned s = static_cast<unsigned>(a) + b;

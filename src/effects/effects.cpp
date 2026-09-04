@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "display/gu_display.h"
+#include "wled_compat.h"
 
 namespace effects {
 
@@ -72,16 +73,6 @@ uint8_t clamp_u8(int v) {
   return static_cast<uint8_t>(v);
 }
 
-// WLED's color_blend(c1, c2, amount): blend from a to b by amount/255.
-// wled00/FX_fcn.cpp
-Rgb blend(const Rgb &a, const Rgb &b, uint8_t amount) {
-  return Rgb{
-      clamp_u8(a.r + (static_cast<int>(b.r) - a.r) * amount / 255),
-      clamp_u8(a.g + (static_cast<int>(b.g) - a.g) * amount / 255),
-      clamp_u8(a.b + (static_cast<int>(b.b) - a.b) * amount / 255),
-  };
-}
-
 // WLED's Segment::color_wheel(): CHSV32(pos << 8, 255, 255) - a plain
 // full-saturation hue wheel, no palette involved. wled00/FX_fcn.cpp:1141
 Rgb color_wheel(uint8_t pos) {
@@ -98,10 +89,6 @@ Rgb color_wheel(uint8_t pos) {
   return Rgb{clamp_u8(static_cast<int>(rp * 255)),
              clamp_u8(static_cast<int>(gp * 255)),
              clamp_u8(static_cast<int>(bp * 255))};
-}
-
-void fill_column(Frame frame, int x, const Rgb &c) {
-  for (int y = 0; y < GuDisplay::HEIGHT; y++) frame[y][x] = c;
 }
 
 // wled00/FX.cpp:136 mode_static() - SEGMENT.fill(SEGCOLOR(0))
