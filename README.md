@@ -115,18 +115,12 @@ Assistant's client library (`frenck/python-wled`), not guessed at:
 
 ## Effects library
 
-178 of real WLED's 219 numbered effects are ported, each citing the exact
+179 of real WLED's 219 numbered effects are ported, each citing the exact
 WLED source function/line it came from. Effect IDs match real WLED's
 `FX_MODE_*` numbering exactly, not porting order — see `effects.h`'s top
-comment. Not ported, by design:
-
-- **Audio-reactive effects** (~40, including 9 that are also Particle
-  System effects) — this board has no microphone.
-- **2D scrolling text** (id 122) — needs WLED's font/glyph-rendering
-  subsystem, which nothing in this firmware provides.
-
-That's every hardware-feasible effect covered, including the Particle
-System:
+comment. That's every hardware-feasible effect covered - the only ones
+left out are **audio-reactive effects** (~40, including 9 that are also
+Particle System effects), because this board has no microphone:
 
 - **156 classic effects** (`src/effects/effects.cpp` plus
   `src/effects/gen_batch0.cpp`-`gen_batch8.cpp`).
@@ -146,6 +140,16 @@ System:
   `Segment::setPixelColor()`'s `M12_pBar` case) rather than a single line,
   so multiple particles show as multiple independent horizontal bars, each
   bouncing on its own — not one shared line.
+- **2D Scrolling Text** (`src/effects/gen_scrolltext.cpp`, id 122) — real
+  WLED's own default font ("Tom Thumb", public domain, 3x6px,
+  `src/effects/font_tom_thumb.h`) ported as a small embedded bitmap
+  lookup, scrolling the text in `Params::name` (set via the control page
+  or `seg[].n` over the API - real WLED dual-purposes its own segment name
+  field as scroll text the same way). Deliberately narrower than real
+  WLED's version: one font instead of its 5-font/.wbf-file-loading
+  `FontManager`, no date/time token substitution (`#TIME`/`#DATE`/... -
+  this firmware has no RTC/NTP time source), no rotation, no
+  gradient/trail.
 
 A full 72-palette engine (`src/effects/palettes.h`/`.cpp`) backs every
 effect that keys off `SEGMENT.palette` in the original — all 59 built-in
@@ -214,6 +218,8 @@ src/
                               same, 1D (this board's 32-pixel matrix row)
     gen_particles_2d.cpp      11 2D Particle System effects built on the engine above
     gen_particles_1d.cpp      11 1D Particle System effects built on the engine above
+    font_tom_thumb.h          embedded 3x6px bitmap font (real WLED's own default)
+    gen_scrolltext.cpp        the "Scrolling Text" effect, built on the font above
     image_data.h / .cpp       backing store for the "Image" effect - a 32x32 RGB buffer the
                               control page fills by drawing an uploaded image onto a <canvas>
                               (browser handles JPEG/PNG/GIF decoding) and POSTing the raw pixels
@@ -260,6 +266,17 @@ slicing) and the white channel is dropped (this board's LEDs are plain
 RGB). `gen_particles_2d.cpp`/`gen_particles_1d.cpp`'s 22 effects are
 ported from `FX.cpp`'s `mode_particle*` functions the same way as every
 other effect here.
+
+`effects/font_tom_thumb.h` embeds real WLED's own default scrolling-text
+font, "Tom Thumb" - public domain, by Robey Pointer
+(https://robey.lag.net/2010/01/23/tiny-monospace-font.html), byte-for-byte
+identical to `wled00/src/font/font_tom_thumb_6px.h`'s data (verified by
+hand-decoding a glyph against that file's own worked example before
+trusting it). `gen_scrolltext.cpp` ports the scrolling/layout logic from
+`FX.cpp`'s `mode_2Dscrollingtext()`, not real WLED's much larger
+`fontmanager.h`/`.cpp` (multi-font selection, `.wbf` file loading from
+flash, glyph caching) - see "Effects library" above for exactly what's
+narrower here.
 
 `api/json_api.cpp`'s `/json/state` and `/json/info` field names and shapes
 are matched against `wled00/json.cpp`'s `serializeState()`/
