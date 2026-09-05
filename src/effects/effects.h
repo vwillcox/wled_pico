@@ -337,6 +337,17 @@ bool is_implemented(Id id);
 
 void render(Id id, GuDisplay &display, uint32_t now_ms, const Params &params, State &state);
 
+// Copies the RGB frame buffer render() last produced into `out` (32x32
+// Rgb, row-major, matching Frame's own [y][x] layout) - a read path onto
+// data that would otherwise only ever flow one way, into GuDisplay's
+// gamma/PWM-encoded bitstream (see gu_display.h; there's no un-gamma-
+// correcting that back into plain RGB). Exists for /debug/frame - a way to
+// verify what an effect is actually doing, since "the code looks right"
+// has been wrong before (see git history: DNA, Pinball, PS Volcano, and
+// Fireworks 1D, which fell back to a solid fill without that being
+// obvious from the source).
+void get_frame(Rgb out[GuDisplay::HEIGHT][GuDisplay::WIDTH]);
+
 }  // namespace effects
 
 // Drop this at file scope right after defining a `mode_` function to wire

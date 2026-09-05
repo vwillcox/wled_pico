@@ -340,6 +340,28 @@ void JsonApi::begin(AsyncWebServer &server) {
     presets_.serve(request);
   });
 
+  // Not a real WLED endpoint. Raw RGB bytes (32*32*3, row-major top-to-
+  // bottom/left-to-right, matching effects::Frame's [y][x] layout) of
+  // whatever effects::render() actually last drew - a read path onto data
+  // that otherwise only ever flows into GuDisplay's gamma/PWM bitstream
+  // (see get_frame()'s own comment in effects.h for why this exists: "the
+  // code looks right" has been wrong before, and there was previously no
+  // way to check what was actually on the LEDs without asking whoever's
+  // standing in front of the physical device).
+  server.on("/debug/frame", HTTP_GET, [](AsyncWebServerRequest *request) {
+    static effects::Rgb frame[GuDisplay::HEIGHT][GuDisplay::WIDTH];
+    effects::get_frame(frame);
+    constexpr size_t kLen = sizeof(frame);
+    AsyncWebServerResponse *response = request->beginResponse(
+        "application/octet-stream", kLen, [](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+          size_t remaining = kLen - index;
+          size_t n = remaining < maxLen ? remaining : maxLen;
+          memcpy(buffer, reinterpret_cast<uint8_t *>(frame) + index, n);
+          return n;
+        });
+    request->send(response);
+  });
+
   // "/json/si" (state+info, no effects/palettes arrays) is what real WLED
   // clients poll routinely - "/json" (the full object, effects/palettes
   // included) is what they fetch once on first connect.

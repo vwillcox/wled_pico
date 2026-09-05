@@ -167,8 +167,12 @@ EFFECTS_REGISTER(Id::kBreath, mode_breath)
 
 }  // namespace
 
+namespace {
+Rgb g_last_frame[GuDisplay::HEIGHT][GuDisplay::WIDTH];
+}  // namespace
+
 void render(Id id, GuDisplay &display, uint32_t now_ms, const Params &params, State &state) {
-  static Rgb frame[GuDisplay::HEIGHT][GuDisplay::WIDTH];
+  auto &frame = g_last_frame;
 
   // `frame` is one shared buffer reused across every effect (state.reset()
   // only zeroes State::data, not this) - effects that read-then-fade their
@@ -198,6 +202,11 @@ void render(Id id, GuDisplay &display, uint32_t now_ms, const Params &params, St
   }
 
   state.call++;
+}
+
+void get_frame(Rgb out[GuDisplay::HEIGHT][GuDisplay::WIDTH]) {
+  for (int y = 0; y < GuDisplay::HEIGHT; y++)
+    for (int x = 0; x < GuDisplay::WIDTH; x++) out[y][x] = g_last_frame[y][x];
 }
 
 }  // namespace effects
