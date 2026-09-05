@@ -98,6 +98,36 @@ Assistant's client library (`frenck/python-wled`), not guessed at:
   WLED *controllers'* state together (this is always the only unit),
   TPM2.NET, and Art-Net/E1.31/DDP (different, heavier protocols).
 
+## Effects library
+
+156 of real WLED's 219 numbered effects are ported (`src/effects/effects.cpp`
+plus `src/effects/gen_batch0.cpp`-`gen_batch8.cpp`), each citing the exact
+WLED source function/line it came from — every hardware-feasible effect
+except one (2D scrolling text, below). Effect IDs match real WLED's
+`FX_MODE_*` numbering exactly, not porting order — see `effects.h`'s top
+comment. Not ported, by design:
+
+- **Audio-reactive effects** (~40) — this board has no microphone.
+- **Particle System effects** (~35) — real WLED's own particle-physics
+  engine (gravity, collisions, per-particle state) is a substantial
+  subsystem in its own right, out of scope here.
+- **2D scrolling text** (id 122) — needs WLED's font/glyph-rendering
+  subsystem, which nothing in this firmware provides.
+
+A full 72-palette engine (`src/effects/palettes.h`/`.cpp`) backs every
+effect that keys off `SEGMENT.palette` in the original — all 59 built-in
+WLED gradient palettes plus the 7 FastLED and 6 segment-color-derived
+ones, ported from WLED's actual palette data (not approximated).
+
+All 219 effect IDs (0-219, the 4 genuinely-retired "RSVD" ones included)
+have been cycled live against real hardware over the JSON API with no
+crashes or watchdog resets. That confirms memory/bounds safety across the
+whole set, not that each one's visual output has been eyeballed
+individually — a handful of upstream WLED quirks were found and
+deliberately reproduced rather than "fixed" (see the per-effect comments
+for specifics), so if one looks off compared to real WLED, check there
+first before assuming a porting bug.
+
 ## Hardware
 
 [Cosmic Unicorn](https://shop.pimoroni.com/products/cosmic-unicorn) — Pico W
@@ -134,7 +164,11 @@ src/
     cosmic_unicorn.pio        PIO program (bit-angle/BCD matrix scan-out)
     gu_display.h / .cpp       driver: begin() / set_pixel() / set_brightness()
   effects/
-    effects.h / .cpp          WLED FX.cpp effects ported onto a flat pixel buffer
+    effects.h / .cpp          effect engine core: Id enum, Params/State, Frame, self-registering dispatch
+    wled_compat.h / .cpp      shared FastLED/WLED 8/16-bit math + PRNG helpers (random8, sin8, beatsin8, ...)
+    palettes.h / .cpp         the 72-palette engine (color_from_palette)
+    gen_batch0.cpp .. gen_batch8.cpp
+                              152 more ported effects, one self-contained file per batch
   net/
     captive_portal.h / .cpp   WiFi AP + wildcard DNS + the served control page
     device_id.h / .cpp        shared colon-free/lowercase MAC helper (mDNS TXT, /json/info)
@@ -157,14 +191,15 @@ support removed, gamma table approximated rather than copied since we
 didn't have Pimoroni's exact values — see the comment in `gu_display.cpp`
 if displayed colors look off).
 
-`effects/effects.cpp`'s four effects are ported from specific functions in
-[wled/WLED](https://github.com/wled/WLED)'s `wled00/FX.cpp`
+`effects/effects.cpp`'s original four effects are ported from specific
+functions in [wled/WLED](https://github.com/wled/WLED)'s `wled00/FX.cpp`
 (`mode_static`, `color_wipe`, `mode_rainbow_cycle`, `mode_breath`) and
 `wled00/FX_fcn.cpp` (`Segment::color_wheel`, `color_blend`) — see the
-per-function comments in that file for exact line references. WLED's own
-Segment/SEGENV state machinery is not used; these effects turned out to be
-stateless functions of time given how our default (non-random-color)
-config exercises them, so nothing else was needed.
+per-function comments in that file for exact line references. The other
+152 effects (`gen_batch0.cpp`-`gen_batch8.cpp`) and the full palette engine
+(`palettes.cpp`) are ported the same way - each function/table cites its
+exact WLED source location - see "Effects library" above for what's
+deliberately not included and why.
 
 `api/json_api.cpp`'s `/json/state` and `/json/info` field names and shapes
 are matched against `wled00/json.cpp`'s `serializeState()`/
