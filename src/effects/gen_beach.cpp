@@ -4,10 +4,12 @@
 #include "wled_compat.h"
 
 // An original effect with no real WLED counterpart - waves rolling in and
-// receding across a sandy beach. Like gen_bathtub.cpp's Bathtub Fill,
-// colors are a fixed scene (sand, sea, foam) rather than routed through
-// the palette/primary-color system, so it reads as "a beach" immediately
-// rather than depending on the user having picked matching colors first.
+// receding across a sandy beach. Colors are a fixed scene (sand, sea,
+// foam) rather than routed through the palette/primary-color system
+// gen_liquidfill.cpp's Liquid Fill uses, so it reads as "a beach"
+// immediately rather than depending on the user having picked matching
+// colors first - there's no one obvious "pick your own" axis here the way
+// Liquid Fill's actual liquid color is.
 namespace effects {
 namespace {
 

@@ -1,16 +1,20 @@
 #include "effects.h"
 
 #include "display/gu_display.h"
+#include "palettes.h"
 #include "wled_compat.h"
 
-// An original effect with no real WLED counterpart - a bathtub filling
-// with water. Water color is a fixed blue gradient rather than routed
-// through the palette/primary-color system every ported effect here uses:
-// this is a small fixed "scene" (water, foam, tub wall) in the same spirit
-// as WLED's own Akemi or Halloween Eyes hardcoding their character colors,
-// so it looks like water immediately rather than depending on the user
-// having already picked a blue palette. Speed/Intensity/Custom1/Option1
-// still shape the animation - see each's use below.
+// An original effect with no real WLED counterpart - a container filling
+// with liquid: water, but also a reasonable beer glass with the right
+// colors (amber Primary, a deeper amber or cream Secondary) or anything
+// else in between. Unlike gen_beach.cpp's fixed sand/sea/foam scene, the
+// liquid itself is a straight Primary (deep)/Secondary (shallow) blend by
+// default - see the render loop below for why plain color_from_palette()
+// isn't used directly despite being every ported effect's usual route to
+// color. Picking a real Palette (Ocean, Fire, ...) still works for a
+// richer built-in gradient. The container wall and surface foam stay
+// fixed neutral colors regardless - foam reads as foam and an empty
+// container reads as empty whatever's actually filling it.
 namespace effects {
 namespace {
 
@@ -23,25 +27,25 @@ struct Bubble {
   float y;      // row units, kH-1 (bottom) rising toward 0 (top)
   bool active;
 };
-struct BathtubState {
+struct LiquidFillState {
   Bubble bubbles[kMaxBubbles];
 };
-static_assert(sizeof(BathtubState) <= State::kDataSize, "BathtubState too big");
+static_assert(sizeof(LiquidFillState) <= State::kDataSize, "LiquidFillState too big");
 
 enum Phase : uint16_t { kFilling = 0, kPausedFull = 1, kDraining = 2, kPausedEmpty = 3 };
 
-void mode_bathtub_fill(uint32_t now_ms, const Params &p, State &state, Frame frame) {
-  auto &s = *reinterpret_cast<BathtubState *>(state.data);
+void mode_liquid_fill(uint32_t now_ms, const Params &p, State &state, Frame frame) {
+  auto &s = *reinterpret_cast<LiquidFillState *>(state.data);
 
   if (state.call == 0) {
     state.aux0 = kFilling;
     state.step = now_ms;
   }
 
-  // Speed sets how fast the tub fills; drain and both pauses scale off the
-  // same number so a fast setting reads as one snappy cycle, not a fast
-  // fill glued to a slow drain. Option1 turns the drain-and-refill loop on
-  // at all - off, it just fills once and stays full (a bath run once,
+  // Speed sets how fast the container fills; drain and both pauses scale
+  // off the same number so a fast setting reads as one snappy cycle, not
+  // a fast fill glued to a slow drain. Option1 turns the drain-and-refill
+  // loop on at all - off, it just fills once and stays full (poured once,
   // rather than looping for an ambient display).
   uint32_t fill_ms = 1500u + (255u - p.speed) * 40u;  // ~1.5s (fast) .. ~11.7s (slow)
   uint32_t drain_ms = fill_ms / 2;
@@ -94,9 +98,7 @@ void mode_bathtub_fill(uint32_t now_ms, const Params &p, State &state, Frame fra
   int amplitude = 1 + (p.intensity >> 6);
   uint8_t time_phase = static_cast<uint8_t>(now_ms >> 5);
 
-  constexpr Rgb kWallColor{10, 11, 15};       // dim, faintly cool - porcelain in low light
-  constexpr Rgb kDeepWater{8, 40, 92};        // near the tub floor
-  constexpr Rgb kShallowWater{60, 170, 205};  // right at the surface
+  constexpr Rgb kWallColor{10, 11, 15};  // dim, faintly cool - glass/porcelain in low light
   constexpr Rgb kFoam{225, 245, 250};
 
   int surface_row[kW];
@@ -117,19 +119,29 @@ void mode_bathtub_fill(uint32_t now_ms, const Params &p, State &state, Frame fra
         frame[y][x] = kFoam;
       } else {
         uint8_t depth = static_cast<uint8_t>(((y - surf) * 255) / kH);
-        frame[y][x] = blend(kShallowWater, kDeepWater, depth);
+        // color_from_palette()'s IDs 0-5 are WLED's "dynamic" palettes
+        // (Default, Random Cycle, ...) - Default in particular quietly
+        // ignores Primary/Secondary entirely in favor of a fixed rainbow,
+        // which would make "set Primary to amber" appear to do nothing
+        // unless the Palette dropdown is *also* moved off Default first.
+        // A direct blend for those IDs means Primary/Secondary just work
+        // out of the box; picking a real palette (Ocean, Fire, ...) still
+        // works for a richer built-in gradient.
+        Rgb liquid = (p.palette_id >= 6) ? color_from_palette(p.palette_id, depth, p.primary, p.secondary, p.tertiary)
+                                          : blend(p.secondary, p.primary, depth);
+        frame[y][x] = liquid;
       }
     }
   }
 
-  // Bubbles fizz up from the tub floor while there's enough water to
-  // plausibly hold them. Custom1 caps how many are active at once (1..20)
-  // rather than just nudging the spawn chance within a small fixed pool -
-  // that made the slider barely visible, since a handful of slots fill up
-  // almost immediately regardless of the chance per frame. Capping the
-  // count directly instead makes low settings read as "the occasional
-  // bubble" and high settings as "fizzing", a real difference across the
-  // slider's range.
+  // Bubbles fizz up from the container floor while there's enough liquid
+  // to plausibly hold them. Custom1 caps how many are active at once
+  // (1..20) rather than just nudging the spawn chance within a small
+  // fixed pool - that made the slider barely visible, since a handful of
+  // slots fill up almost immediately regardless of the chance per frame.
+  // Capping the count directly instead makes low settings read as "the
+  // occasional bubble" and high settings as "fizzing", a real difference
+  // across the slider's range.
   int bubble_limit = 1 + (static_cast<int>(p.custom1) * (kMaxBubbles - 1)) / 255;
   if (filled_rows > 4) {
     int active_count = 0;
@@ -158,7 +170,7 @@ void mode_bathtub_fill(uint32_t now_ms, const Params &p, State &state, Frame fra
     for (auto &b : s.bubbles) b.active = false;
   }
 }
-EFFECTS_REGISTER(Id::kBathtubFill, mode_bathtub_fill)
+EFFECTS_REGISTER(Id::kLiquidFill, mode_liquid_fill)
 
 }  // namespace
 }  // namespace effects

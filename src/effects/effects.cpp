@@ -59,7 +59,7 @@ constexpr const char *kNames[static_cast<size_t>(Id::kCount)] = {
     "PS Dancing Shadows", "PS Fireworks 1D", "PS Sparkler", "PS Hourglass", "PS Spray 1D",
     "PS 1D Balance", "PS Chase", "PS Starburst", "PS GEQ 1D", "PS Fire 1D", "PS Sonic Stream",
     "PS Sonic Boom", "PS Springy", "PS Galaxy", "Color Clouds", "Slow Transition",
-    "Bathtub Fill", "Beach Waves",
+    "Liquid Fill", "Beach Waves",
 };
 static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Id::kCount),
               "kNames must have one entry per Id");

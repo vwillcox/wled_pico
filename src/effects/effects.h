@@ -258,8 +258,8 @@ enum class Id : uint8_t {
   // than reusing a "RSVD" slot, which would make a real WLED client
   // misreport a real, rendering effect as reserved/nonexistent (see this
   // file's top comment on why the numbering below 220 has to stay exactly
-  // real WLED's own). See gen_bathtub.cpp / gen_beach.cpp.
-  kBathtubFill = 220,
+  // real WLED's own). See gen_liquidfill.cpp / gen_beach.cpp.
+  kLiquidFill = 220,
   kBeachWaves = 221,
   kCount = 222,
 };
