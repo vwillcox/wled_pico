@@ -155,6 +155,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
 let state = null;
 let ws = null;
 let suppressEcho = false;
+let g_effectNames = [];  // filled once /json/eff resolves, near the bottom of this file
 
 function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);
@@ -270,6 +271,26 @@ async function presetRequest(body) {
   return s;
 }
 
+// Relabels each Load button with the effect name saved to that slot (e.g.
+// "1: Fire 2012"), falling back to "Load N" for an empty slot or before
+// g_effectNames is populated. Called once effect names are in, and again
+// after any save/delete - presets.json only changes on those, not on load.
+async function refreshPresetLabels() {
+  let presets;
+  try {
+    presets = await (await fetch('/presets.json')).json();
+  } catch (err) {
+    return;  // leave whatever labels are already showing
+  }
+  for (let i = 1; i <= 8; i++) {
+    const btn = loadDiv.querySelector(`[data-preset-id="${i}"]`);
+    if (!btn) continue;
+    const saved = presets[i];
+    const fx = saved && saved.seg && saved.seg[0] ? saved.seg[0].fx : undefined;
+    btn.textContent = (fx !== undefined && g_effectNames[fx]) ? (i + ': ' + g_effectNames[fx]) : ('Load ' + i);
+  }
+}
+
 const presetStatus = document.getElementById('presetStatus');
 const loadDiv = document.getElementById('presetLoad');
 const saveDiv = document.getElementById('presetSave');
@@ -277,6 +298,7 @@ const deleteDiv = document.getElementById('presetDelete');
 for (let i = 1; i <= 8; i++) {
   const l = document.createElement('button');
   l.textContent = 'Load ' + i;
+  l.dataset.presetId = i;
   l.addEventListener('click', async () => {
     presetStatus.textContent = 'loading slot ' + i + '…';
     try {
@@ -293,6 +315,7 @@ for (let i = 1; i <= 8; i++) {
     try {
       await presetRequest({ psave: i });
       presetStatus.textContent = 'saved to slot ' + i;
+      await refreshPresetLabels();
     } catch (err) { presetStatus.textContent = 'failed: ' + err; }
   });
   saveDiv.appendChild(s);
@@ -305,6 +328,7 @@ for (let i = 1; i <= 8; i++) {
     try {
       await presetRequest({ pdel: i });
       presetStatus.textContent = 'deleted slot ' + i;
+      await refreshPresetLabels();
     } catch (err) { presetStatus.textContent = 'failed: ' + err; }
   });
   deleteDiv.appendChild(d);
@@ -812,6 +836,7 @@ Promise.all([
   fetch('/json/implemented').then(r => r.json()),
   fetch('/json/pal').then(r => r.json()),
 ]).then(([names, implemented, paletteNames]) => {
+  g_effectNames = names;
   const fx = document.getElementById('fx');
   names.forEach((n, i) => {
     if (!implemented[i]) return;
@@ -829,6 +854,7 @@ Promise.all([
   });
   connectWs();
   fetch('/json/state').then(r => r.json()).then(applyToUI);
+  refreshPresetLabels();
 });
 </script>
 </body>
