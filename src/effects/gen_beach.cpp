@@ -28,14 +28,21 @@ void mode_beach_waves(uint32_t now_ms, const Params &p, State &state, Frame fram
 
   // One wave per cycle: a smooth surge up onto the sand (positive half of
   // a sine), then a calm trough before the next - not a wave sitting at
-  // its peak the whole time. Speed sets the cycle length; a fresh random
-  // peak height is drawn every cycle (state.aux0) so waves form loose
-  // "sets" (some bigger, some smaller) instead of all being identical.
+  // its peak the whole time. Speed sets the cycle length. Intensity is the
+  // direct wave-height control (how far up the beach waves reach), with a
+  // modest per-cycle jitter layered on top (state.aux0, redrawn once per
+  // cycle) so consecutive waves still form loose "sets" - some a little
+  // bigger, some a little smaller - rather than every wave being identical
+  // or the slider itself feeling random.
   uint32_t cycle_ms = 900u + (255u - p.speed) * 12u;
   auto cycle_idx = static_cast<uint16_t>(now_ms / cycle_ms);
   if (cycle_idx != state.aux1) {
     state.aux1 = cycle_idx;
-    state.aux0 = static_cast<uint16_t>(5 + random8(static_cast<uint8_t>(3 + (p.intensity >> 4))));
+    int base_height = 2 + (p.intensity * 20) / 255;  // 2..22 rows
+    int jitter = 1 + (base_height >> 2);
+    int height = base_height + random8(static_cast<uint8_t>(jitter * 2 + 1)) - jitter;
+    if (height < 1) height = 1;
+    state.aux0 = static_cast<uint16_t>(height);
   }
   uint32_t t = now_ms % cycle_ms;
   uint8_t phase255 = static_cast<uint8_t>((t * 255) / cycle_ms);
