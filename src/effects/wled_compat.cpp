@@ -60,8 +60,12 @@ uint16_t beat16(uint32_t now_ms, uint8_t bpm, uint16_t phase_offset) {
 }
 }  // namespace
 
-uint8_t beatsin8(uint32_t now_ms, uint8_t bpm, uint8_t low, uint8_t high, uint16_t phase_offset) {
-  uint8_t s = sin8(static_cast<uint8_t>(beat16(now_ms, bpm, phase_offset) >> 8));
+uint8_t beatsin8(uint32_t now_ms, uint8_t bpm, uint8_t low, uint8_t high, uint8_t phase_offset) {
+  // phase_offset added in the 8-bit domain (after truncating the beat
+  // counter), matching real WLED's beatsin8_t() exactly - see this
+  // function's declaration comment in wled_compat.h for why this matters.
+  uint8_t beat = static_cast<uint8_t>(beat16(now_ms, bpm, 0) >> 8);
+  uint8_t s = sin8(static_cast<uint8_t>(beat + phase_offset));
   return static_cast<uint8_t>(low + scale8(s, static_cast<uint8_t>(high - low)));
 }
 

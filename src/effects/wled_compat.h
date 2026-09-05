@@ -33,8 +33,20 @@ int16_t cos16(uint16_t theta);  // roughly -32767..32767
 // strip.now; here it's an explicit `now_ms` parameter (this firmware's
 // equivalent, passed through from render()'s now_ms same as everywhere
 // else).
+//
+// `phase_offset` is uint8_t here, matching real WLED's beatsin8_t()
+// exactly (wled00/util.cpp: `sin8_t(beat8(bpm, timebase) + phase_offset)`)
+// - it's added in the same 8-bit domain sin8() operates in, so 128 means
+// exactly half a cycle (used constantly to put two waves 180 degrees
+// apart, e.g. the two strands of the DNA effect). A wider type here would
+// silently shrink that to a fraction of a percent of a cycle instead - a
+// real bug this had until a report of DNA showing one line instead of two
+// (effect id 152) traced it here. Callers passing an expression like
+// `x*10` that overflows 255 get real WLED's own wraparound behavior for
+// free via the implicit truncation, which several effects rely on as a
+// deliberate repeating pattern - not something to "fix" further.
 uint8_t beatsin8(uint32_t now_ms, uint8_t bpm, uint8_t low = 0, uint8_t high = 255,
-                  uint16_t phase_offset = 0);
+                  uint8_t phase_offset = 0);
 uint16_t beatsin16(uint32_t now_ms, uint8_t bpm, uint16_t low = 0, uint16_t high = 65535,
                     uint16_t phase_offset = 0);
 
