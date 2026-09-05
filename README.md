@@ -33,6 +33,21 @@ onto 32x32-shaped, differently-multiplexed silicon. The driver has since
 been rebuilt against Cosmic Unicorn's actual geometry, pin/bitstream layout,
 and PIO program - see Credits. Re-verified clean on hardware afterward.
 
+## Screenshots
+
+Every clip below is a real capture from the physical device, not a
+simulation - pulled frame-by-frame from `GET /debug/frame` (a debug
+endpoint that dumps the exact RGB buffer `effects::render()` last drew,
+added specifically so effects could be verified by looking at them rather
+than reading the code and assuming).
+
+| | |
+|---|---|
+| ![Control page](docs/media/control_page.png) The control page (`src/net/captive_portal.cpp`) - real WLED `/json/state` shape underneath, no app required. | ![Fireworks 1D](docs/media/fireworks1d.gif) **Fireworks 1D** (effect 90) - a flare climbs, bursts into sparks, fades out, repeats. |
+| ![Fire 2012](docs/media/fire2012.gif) **Fire 2012** - one of the 159 classic ported effects. | ![PS Volcano](docs/media/psvolcano.gif) **PS Volcano** - real WLED particle-physics engine, sub-pixel positions and gravity. |
+| ![Scrolling Text](docs/media/scrolltext.gif) **2D Scrolling Text** - the embedded Tom Thumb font rendering `seg[].n` live. | ![Lissajous](docs/media/lissajous.gif) **Lissajous** - a rotating curve, one of the two purely-mathematical (no audio, no hardware dependency) effects found still unported and added afterward. |
+| ![Noise Pal](docs/media/noisepal.gif) **Noise Pal** - Perlin noise driving a palette lookup, the other of those two. | ![PS Fire 1D](docs/media/psfire1d.gif) **PS Fire 1D** - a 1D particle simulation mapped onto the matrix as horizontal bands, matching real WLED's own default 1D-on-2D mapping exactly (not a bug - see `gen_particles_1d.cpp`). |
+
 ## Status
 
 **All 5 milestones done and verified on hardware**, including a live,
@@ -115,15 +130,23 @@ Assistant's client library (`frenck/python-wled`), not guessed at:
 
 ## Effects library
 
-179 of real WLED's 219 numbered effects are ported, each citing the exact
-WLED source function/line it came from. Effect IDs match real WLED's
-`FX_MODE_*` numbering exactly, not porting order — see `effects.h`'s top
-comment. That's every hardware-feasible effect covered - the only ones
-left out are **audio-reactive effects** (~40, including 9 that are also
-Particle System effects), because this board has no microphone:
+178 of real WLED's 220 numbered effect IDs (0-219) are ported, each citing
+the exact WLED source function/line it came from. Effect IDs match real
+WLED's `FX_MODE_*` numbering exactly, not porting order — see `effects.h`'s
+top comment. That's every hardware-feasible effect covered - of the 42
+left out, 4 are real WLED's own reserved/retired "RSVD" slots (not real
+effects even in upstream WLED) and the other 38 are **audio-reactive**
+effects (including 9 that are also Particle System effects), out of scope
+because this board has no microphone. Every remaining ID was individually
+checked against real WLED's source for `getAudioData()`/FFT usage before
+being written off as infeasible - three effects that looked unported
+turned out to have no hardware dependency at all (Fireworks 1D, Noise Pal,
+Lissajous) and were ported once found, rather than staying wrongly
+lumped in with the audio-reactive set.
 
-- **156 classic effects** (`src/effects/effects.cpp` plus
-  `src/effects/gen_batch0.cpp`-`gen_batch8.cpp`).
+- **159 classic effects** (`src/effects/effects.cpp` plus
+  `src/effects/gen_batch0.cpp`-`gen_batch8.cpp`), including the three found
+  and ported afterward: Fireworks 1D, Noise Pal, and Lissajous.
 - **22 Particle System effects** (`src/effects/gen_particles_2d.cpp` /
   `gen_particles_1d.cpp`, ids 187-217 — Volcano, Fire, Fireworks, Vortex,
   Fuzzy Noise, Ballpit, Box, Impact, Waterfall, Ghost Rider, Galaxy, and
