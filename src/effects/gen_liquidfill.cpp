@@ -49,7 +49,7 @@ void mode_liquid_fill(uint32_t now_ms, const Params &p, State &state, Frame fram
   // rather than looping for an ambient display).
   uint32_t fill_ms = 1500u + (255u - p.speed) * 40u;  // ~1.5s (fast) .. ~11.7s (slow)
   uint32_t drain_ms = fill_ms / 2;
-  uint32_t pause_full_ms = 500u + p.custom2 * 4u;  // ~0.5s..1.5s dwell at full
+  constexpr uint32_t pause_full_ms = 800;
   uint32_t pause_empty_ms = 400;
 
   uint32_t elapsed = now_ms - state.step;
@@ -101,6 +101,21 @@ void mode_liquid_fill(uint32_t now_ms, const Params &p, State &state, Frame fram
   constexpr Rgb kWallColor{10, 11, 15};  // dim, faintly cool - glass/porcelain in low light
   constexpr Rgb kFoam{225, 245, 250};
 
+  // Custom3: how much of a head builds up as the container fills - 0 stays
+  // a thin surface line throughout, 255 grows into a substantial foam cap
+  // by the time it's full (a well-poured beer vs. a still glass of water).
+  // Scales with the current fill level, not just Custom3 alone, so an
+  // empty/just-starting pour never shows a full head.
+  int max_foam_growth = (p.custom3 * 8) / 255;  // 0..8 rows at full
+  int foam_thickness = 1 + (max_foam_growth * filled_rows) / kH;
+
+  // Custom2: how uneven/bubbly the foam's own outer edge is, independent
+  // of Intensity's control over the liquid surface's waviness underneath -
+  // a different frequency and phase speed so the two don't just move
+  // together as one wave.
+  int foam_wave_amplitude = p.custom2 >> 6;  // 0..3
+  uint8_t foam_time_phase = static_cast<uint8_t>(now_ms >> 4);
+
   int surface_row[kW];
   for (int x = 0; x < kW; x++) {
     int wave = (static_cast<int>(sin8(static_cast<uint8_t>(x * 24 + time_phase))) - 128) * amplitude / 128;
@@ -112,13 +127,24 @@ void mode_liquid_fill(uint32_t now_ms, const Params &p, State &state, Frame fram
 
   for (int x = 0; x < kW; x++) {
     int surf = surface_row[x];
+    int foam_wave =
+        (static_cast<int>(sin8(static_cast<uint8_t>(x * 41 + foam_time_phase))) - 128) * foam_wave_amplitude / 128;
+    // The foam band sits ON TOP OF the liquid, within the same overall
+    // fill level - it grows DOWNWARD from surf into what would otherwise
+    // be visible liquid, rather than needing room above surf that isn't
+    // there once the container is nearly full (a beer's head takes up
+    // some of the glass's contents, it doesn't add extra height beyond
+    // the rim).
+    int foam_bottom = surf + foam_thickness - 1 + foam_wave;
+    if (foam_bottom < surf) foam_bottom = surf;  // never thinner than the base surface line itself
+    if (foam_bottom > kH - 1) foam_bottom = kH - 1;
     for (int y = 0; y < kH; y++) {
       if (y < surf) {
         frame[y][x] = kWallColor;
-      } else if (y == surf && filled_rows > 0) {
+      } else if (y <= foam_bottom) {
         frame[y][x] = kFoam;
       } else {
-        uint8_t depth = static_cast<uint8_t>(((y - surf) * 255) / kH);
+        uint8_t depth = static_cast<uint8_t>(((y - foam_bottom) * 255) / kH);
         // color_from_palette()'s IDs 0-5 are WLED's "dynamic" palettes
         // (Default, Random Cycle, ...) - Default in particular quietly
         // ignores Primary/Secondary entirely in favor of a fixed rainbow,
