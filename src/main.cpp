@@ -10,10 +10,12 @@
 #include <ESP8266mDNS.h>
 #include <WiFi.h>
 
+#include "api/image_upload.h"
 #include "api/json_api.h"
 #include "api/ota.h"
 #include "display/gu_display.h"
 #include "effects/effects.h"
+#include "effects/image_data.h"
 #include "net/captive_portal.h"
 #include "net/device_id.h"
 #include "net/realtime_udp.h"
@@ -24,6 +26,7 @@ GuDisplay display;
 CaptivePortal portal;
 JsonApi api;
 Ota ota;
+ImageUpload image_upload;
 RealtimeUdp realtime;
 
 // mDNS advertisement (_wled._tcp + _http._tcp, TXT "mac") - what the WLED
@@ -46,8 +49,10 @@ void setup() {
   portal.begin("WLED-Pico-Setup");
   api.begin(portal.server());
   ota.begin(portal.server());
+  image_upload.begin(portal.server());
   portal.server().begin();
 
+  effects::load_image();  // needs LittleFS mounted - portal.begin() already did that
   begin_mdns();
   realtime.begin();
 

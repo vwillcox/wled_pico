@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "display/gu_display.h"
+#include "image_data.h"
 #include "palettes.h"
 #include "wled_compat.h"
 
@@ -681,12 +682,21 @@ void mode_running_dual(uint32_t now_ms, const Params &p, State &, Frame frame) {
 }
 EFFECTS_REGISTER(Id::kRunningDual, mode_running_dual)
 
-// wled00/FX.cpp:4642 mode_image() - without WLED_ENABLE_GIF (this
-// firmware has no filesystem/GIF support), upstream itself falls back to
-// FX_FALLBACK_STATIC (mode_static()); that's the actually-correct port
-// here, not a shortcut.
+// wled00/FX.cpp:4642 mode_image() - real WLED displays an uploaded GIF via
+// WLED_ENABLE_GIF (filesystem-backed storage + a GIF decoder), which this
+// firmware doesn't have. Instead of porting a GIF decoder onto an RP2040,
+// image_data.h pushes the decode work onto the browser (see its own top
+// comment) and hands back a plain 32x32 RGB buffer - display that if one's
+// been uploaded, otherwise fall back to Solid, matching upstream's own
+// FX_FALLBACK_STATIC behavior when WLED_ENABLE_GIF isn't compiled in.
 void mode_image(uint32_t, const Params &p, State &, Frame frame) {
-  for (int x = 0; x < GuDisplay::WIDTH; x++) fill_column(frame, x, p.primary);
+  if (!has_image()) {
+    for (int x = 0; x < GuDisplay::WIDTH; x++) fill_column(frame, x, p.primary);
+    return;
+  }
+  for (int y = 0; y < GuDisplay::HEIGHT; y++) {
+    for (int x = 0; x < GuDisplay::WIDTH; x++) frame[y][x] = image_pixel(x, y);
+  }
 }
 EFFECTS_REGISTER(Id::kImage, mode_image)
 

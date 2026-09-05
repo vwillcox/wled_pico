@@ -104,6 +104,15 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   </div>
 </div>
 
+<h2>Custom image</h2>
+<p style="font-size:0.8rem;color:#888;">
+  Any image file - it's resized to 32x32 right here in the browser (stretched
+  to fill, not cropped) before uploading, so this device never has to decode
+  a JPEG/PNG/GIF itself. Select the "Image" effect above to display it.
+</p>
+<input type="file" id="imageFile" accept="image/*">
+<div id="imageStatus" style="font-size:0.8rem;color:#888;margin-top:0.5rem;"></div>
+
 <h2>Join WiFi</h2>
 <p style="font-size:0.8rem;color:#888;">
   Drops this device's own WLED-Pico-Setup AP to join an existing network
@@ -244,6 +253,31 @@ for (let i = 1; i <= 8; i++) {
   s.addEventListener('click', () => post({ psave: i }));
   saveDiv.appendChild(s);
 }
+
+document.getElementById('imageFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const imgStatus = document.getElementById('imageStatus');
+  try {
+    imgStatus.textContent = 'resizing…';
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, 32, 32);
+    const rgba = ctx.getImageData(0, 0, 32, 32).data;
+    const rgb = new Uint8Array(32 * 32 * 3);
+    for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+      rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
+    }
+    imgStatus.textContent = 'uploading…';
+    await fetch('/image', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: rgb });
+    imgStatus.textContent = 'done - select the Image effect above to view it';
+  } catch (err) {
+    imgStatus.textContent = 'failed: ' + err;
+  }
+});
 
 document.getElementById('otaForm').addEventListener('submit', async e => {
   e.preventDefault();
