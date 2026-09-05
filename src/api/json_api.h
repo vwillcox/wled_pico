@@ -54,10 +54,21 @@ class JsonApi {
   void serialize_effects(JsonArray arr) const;
   void serialize_palettes(JsonArray arr) const;
 
-  // Applies on/bri/seg[0].{fx,sx,ix,col} from `root`, then handles
-  // WLED's psave/ps/pdel preset fields (which need the *result* of that
-  // application to snapshot, in psave's case) - so this does both steps
-  // real WLED splits across deserializeState() and handleSet().
+  // Applies on/bri/seg[0].{fx,sx,ix,col} from `root` only - no preset
+  // fields. A loaded preset's saved content is applied through this, never
+  // through apply_state() below: since serialize_state() always writes a
+  // "ps" field (see current_preset_), every saved preset carries whatever
+  // preset happened to be current at save time, and running that back
+  // through the full preset-command handling would load *that* preset too,
+  // recursively - two presets that reference each other this way overflow
+  // the stack and crash the board (see the psave handler's comment).
+  void apply_basic_state(JsonObjectConst root);
+
+  // Calls apply_basic_state(), then handles WLED's psave/ps/pdel preset
+  // fields (which need the *result* of that application to snapshot, in
+  // psave's case) - so this does both steps real WLED splits across
+  // deserializeState() and handleSet(). Only ever call this on a real
+  // client request, never on a loaded preset's own content.
   void apply_state(JsonObjectConst root);
 
   void broadcast_state();

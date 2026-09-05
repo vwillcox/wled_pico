@@ -150,7 +150,7 @@ void JsonApi::serialize_palettes(JsonArray arr) const {
 // handle in real WLED. Only seg[0] is honored (no multi-segment); "col"
 // entries follow WLED's [r,g,b] array form only (hex-string/object/Kelvin
 // forms from real WLED are out of scope here).
-void JsonApi::apply_state(JsonObjectConst root) {
+void JsonApi::apply_basic_state(JsonObjectConst root) {
   if (root["on"].is<bool>()) on_ = root["on"].as<bool>();
   if (root["bri"].is<int>()) {
     int v = root["bri"].as<int>();
@@ -210,6 +210,10 @@ void JsonApi::apply_state(JsonObjectConst root) {
       }
     }
   }
+}
+
+void JsonApi::apply_state(JsonObjectConst root) {
+  apply_basic_state(root);
 
   // Preset fields, applied after the above so "psave" snapshots whatever
   // else this same request just changed - matches real WLED applying
@@ -219,15 +223,17 @@ void JsonApi::apply_state(JsonObjectConst root) {
     JsonDocument doc;
     JsonObject loaded = doc.to<JsonObject>();
     if (presets_.load(id, loaded)) {
-      apply_state(loaded);  // recurse once on the loaded state, no preset fields in it
+      apply_basic_state(loaded);  // never apply_state(): see this function's header comment
       current_preset_ = id;
     }
   }
   if (root["psave"].is<int>()) {
     int id = root["psave"].as<int>();
     JsonDocument doc;
-    serialize_state(doc.to<JsonObject>());
-    if (presets_.save(id, doc.as<JsonObjectConst>())) current_preset_ = id;
+    JsonObject obj = doc.to<JsonObject>();
+    serialize_state(obj);
+    obj["ps"] = -1;  // never save a live "ps" self-reference - see apply_basic_state()'s comment
+    if (presets_.save(id, obj)) current_preset_ = id;
   }
   if (root["pdel"].is<int>()) {
     presets_.remove(root["pdel"].as<int>());
