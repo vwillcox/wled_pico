@@ -318,6 +318,16 @@ void register_mode(Id id, ModeFn fn);
 // this file's top comment for why that specific string.
 const char *name(Id id);
 
+// True if `id` has an actual registered renderer. Real WLED's own
+// /json/eff has to stay a dense, index-aligned array matching its ID
+// space (that's the whole point of matching its numbering - see this
+// file's top comment), so it lists every real WLED effect name whether or
+// not this firmware happens to implement it (audio-reactive/particle-
+// system effects and 2D scrolling text don't - see README.md's "Effects
+// library" section for why). This is how a UI can tell those apart from
+// one that'll actually render something, without changing that array.
+bool is_implemented(Id id);
+
 void render(Id id, GuDisplay &display, uint32_t now_ms, const Params &params, State &state);
 
 }  // namespace effects

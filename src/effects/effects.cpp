@@ -65,6 +65,8 @@ static_assert(sizeof(kNames) / sizeof(kNames[0]) == static_cast<size_t>(Id::kCou
 
 const char *name(Id id) { return kNames[static_cast<size_t>(id)]; }
 
+bool is_implemented(Id id) { return g_table[static_cast<size_t>(id)] != nullptr; }
+
 namespace {
 
 uint8_t clamp_u8(int v) {

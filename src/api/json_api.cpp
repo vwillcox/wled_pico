@@ -298,6 +298,21 @@ void JsonApi::begin(AsyncWebServer &server) {
   server.on("/json/effects", HTTP_GET, serve_effects);
   server.on("/json/eff", HTTP_GET, serve_effects);
 
+  // Not a real WLED endpoint - /json/eff has to stay real WLED's dense,
+  // index-aligned name array for compatibility (see effects.h), so it
+  // lists plenty of effects (audio-reactive, particle-system, 2D
+  // scrolling text) this firmware can't actually render. This is how the
+  // built-in control page (src/net/captive_portal.cpp) tells those apart
+  // from ones that'll do something, without touching that array.
+  server.on("/json/implemented", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (size_t i = 0; i < kEffectCount; i++) arr.add(effects::is_implemented(static_cast<effects::Id>(i)));
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(doc, *response);
+    request->send(response);
+  });
+
   auto serve_palettes = [this](AsyncWebServerRequest *request) {
     JsonDocument doc;
     serialize_palettes(doc.to<JsonArray>());

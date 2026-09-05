@@ -240,14 +240,20 @@ document.getElementById('staForget').addEventListener('click', async () => {
 refreshStaStatus();
 
 // Effect IDs now match real WLED's numbering (see src/effects/effects.h),
-// so they're sparse and not implemented for every ID - populate the
-// dropdown from /json/eff rather than hardcoding options, same as any real
-// WLED UI would, skipping "RSVD" (real WLED's own name for an ID with no
-// effect - see effects.h for why).
-fetch('/json/eff').then(r => r.json()).then(names => {
+// so /json/eff is a dense array naming every real WLED effect whether or
+// not this firmware actually implements it (audio-reactive/particle-
+// system effects and 2D scrolling text don't - see README.md's "Effects
+// library" section). Cross-reference /json/implemented (not a real WLED
+// endpoint, just for this page) so the dropdown only offers ones that'll
+// actually render something, instead of silently falling back to a flat
+// color when picked.
+Promise.all([
+  fetch('/json/eff').then(r => r.json()),
+  fetch('/json/implemented').then(r => r.json()),
+]).then(([names, implemented]) => {
   const fx = document.getElementById('fx');
   names.forEach((n, i) => {
-    if (n === 'RSVD') return;
+    if (!implemented[i]) return;
     const opt = document.createElement('option');
     opt.value = i;
     opt.textContent = n;
