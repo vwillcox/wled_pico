@@ -327,7 +327,7 @@ void mode_percent(uint32_t, const Params &p, State &state, Frame frame) {
         col = p.secondary;
       }
     } else {
-      if (static_cast<unsigned>(i) < (width - state.aux1)) {
+      if (static_cast<unsigned>(i) < static_cast<unsigned>(width - state.aux1)) {
         col = p.secondary;
       } else {
         if (p.option1)
@@ -713,12 +713,18 @@ uint8_t pseudo_noise8(uint16_t x) {
 void phased_base(uint32_t now_ms, const Params &p, State &state, Frame frame, bool noise_mod) {
   constexpr int width = GuDisplay::WIDTH;
   constexpr unsigned allfreq = 16;
-  float &phase = *reinterpret_cast<float *>(&state.step);
+  // state.step's 4 bytes double as a persistent float, matching WLED's own
+  // SEGENV.step reinterpret trick - memcpy instead of a reinterpret_cast
+  // reference to avoid a strict-aliasing violation while keeping the same
+  // storage.
+  float phase;
+  memcpy(&phase, &state.step, sizeof(phase));
   unsigned cut_off = 255 - p.intensity;
   unsigned mod_val = 5;
 
   unsigned index = now_ms / 64;
   phase += p.speed / 32.0f;
+  memcpy(&state.step, &phase, sizeof(phase));
 
   for (int i = 0; i < width; i++) {
     if (noise_mod) mod_val = pseudo_noise8(static_cast<uint16_t>(i * 10 + i * 10)) / 16;
