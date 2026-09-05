@@ -287,7 +287,7 @@ async function refreshPresetLabels() {
     if (!btn) continue;
     const saved = presets[i];
     const fx = saved && saved.seg && saved.seg[0] ? saved.seg[0].fx : undefined;
-    btn.textContent = (fx !== undefined && g_effectNames[fx]) ? (i + ': ' + g_effectNames[fx]) : ('Load ' + i);
+    btn.textContent = (fx !== undefined && g_effectNames[fx]) ? g_effectNames[fx] : ('Load ' + i);
   }
 }
 
