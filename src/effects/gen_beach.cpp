@@ -52,16 +52,17 @@ void mode_beach_waves(uint32_t now_ms, const Params &p, State &state, Frame fram
 
   for (int x = 0; x < kW; x++) {
     int col_wave = (static_cast<int>(sin8(static_cast<uint8_t>(x * 18 + (now_ms >> 6)))) - 128) / 90;  // +-1px
-    int front = sand_top - surge + col_wave;
+    // Surge must push the water/sand boundary DOWN the screen (larger row
+    // number = further onto the beach) as it grows - this was subtracted
+    // instead of added, so a big wave shrank the water area and exposed
+    // *more* sand instead of covering more of it, and the receded/calm
+    // state showed the most water. That inversion is what made washed
+    // sand look dry and dry sand look freshly washed.
+    int front = sand_top + surge + col_wave;
     if (front < 0) front = 0;
     if (front > kH) front = kH;
 
-    // front <= sand_top is true almost every frame just from the resting
-    // waterline plus col_wave's cosmetic jitter, even with no real surge -
-    // gating on surge itself (not just the jittered front position) is
-    // what keeps sand able to fully dry between waves instead of reading
-    // as permanently wet.
-    bool washed = surge > 1 && front <= sand_top;
+    bool washed = surge > 1;
     if (p.option1) {
       s.wet[x] = washed ? 255 : qsub8(s.wet[x], decay);
     } else {
