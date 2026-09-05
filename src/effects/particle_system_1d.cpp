@@ -577,21 +577,18 @@ void render(Frame frame) {
     for (uint32_t x = 0; x < kStripLength; x++) accum_buf[x] = scale_add(accum_buf[x], secondary_, 255);
   }
 
-  // Unlike every *classic* 1D effect in this codebase (chases, twinkles,
-  // ...), which broadcast their computed color down every row via
-  // fill_column() to make an ambient pattern fill the whole matrix,
-  // particle effects represent discrete objects - balls, sparks, sand
-  // grains - that are supposed to look small. Broadcasting those down all
-  // 32 rows turned every particle into a full-height vertical bar instead
-  // of a ball (reported: Pinball looked like solid bars, not bouncing
-  // balls). Render onto one middle row instead, like an actual physical
-  // LED strip would - the rest of the frame is cleared so nothing lingers
-  // from a previous effect or a previous frame's wider content.
-  constexpr int kRenderRow = GuDisplay::HEIGHT / 2 - 1;
-  for (int y = 0; y < GuDisplay::HEIGHT; y++) {
-    for (uint32_t x = 0; x < kStripLength; x++) {
-      frame[y][x] = (y == kRenderRow) ? accum_buf[x] : Rgb{0, 0, 0};
-    }
+  // Real WLED's actual default mapping for these effects (Segment::
+  // setPixelColor()'s M12_pBar case, wled00/FX_fcn.cpp - confirmed by
+  // reading it, not guessed): each strip position becomes its own ROW,
+  // drawn as a full-WIDTH horizontal bar, not confined to a single fixed
+  // row and not broadcast down columns either (both tried first and both
+  // wrong - see git history). Since these effects simulate many particles
+  // at once, each sitting at its own strip position, this is what actually
+  // produces "multiple horizontal lines, each its own ball" - one bar per
+  // particle's current row, moving independently.
+  for (uint32_t i = 0; i < kStripLength; i++) {
+    int y = static_cast<int>(kStripLength - 1 - i);
+    for (int x = 0; x < GuDisplay::WIDTH; x++) frame[y][x] = accum_buf[i];
   }
 }
 

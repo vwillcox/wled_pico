@@ -157,7 +157,7 @@ void mode_particlevolcano(uint32_t, const Params &p, State &state, Frame frame) 
           ps2d::sources[i].source.vx > 0 ? static_cast<int8_t>(p.custom1 >> 2) : static_cast<int8_t>(-(p.custom1 >> 2));
       ps2d::sources[i].vy = static_cast<int8_t>(p.speed >> 2);
       ps2d::sources[i].vx = 0;
-      ps2d::sources[i].var = static_cast<int8_t>(p.custom3 >> 1);
+      ps2d::sources[i].var = static_cast<int8_t>(custom3_native(p.custom3) >> 1);
       ps2d::spray_emit(ps2d::sources[i]);
       ps2d::set_wall_hardness(255);
       ps2d::particle_move_update(ps2d::sources[i].source, ps2d::sources[i].source_flags, &volcano_settings);
