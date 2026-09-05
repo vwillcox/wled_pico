@@ -268,6 +268,13 @@ struct Params {
   Rgb secondary{0, 0, 0};   // matches SEGCOLOR(1)
   Rgb tertiary{0, 0, 0};    // matches SEGCOLOR(2)
   uint8_t palette_id = 0;   // matches SEGMENT.palette, see palettes.h
+
+  // Matches SEGMENT.name (real WLED's per-segment display name field,
+  // JSON "n") - dual-purposed by real WLED's Scrolling Text effect as the
+  // text to display (see gen_scrolltext.cpp), the same repurposing real
+  // WLED itself does rather than a dedicated text field.
+  static constexpr size_t kNameSize = 33;
+  char name[kNameSize] = "WLED PICO";
 };
 
 // Per-effect persistent state, real WLED's SEGENV trimmed to the

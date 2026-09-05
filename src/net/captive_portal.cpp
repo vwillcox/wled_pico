@@ -104,6 +104,9 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   </div>
 </div>
 
+<label>Scroll text (for the "Scrolling Text" effect)</label>
+<input type="text" id="scrollText" maxlength="32">
+
 <h2>Custom image</h2>
 <p style="font-size:0.8rem;color:#888;">
   Any image file - it's resized to 32x32 right here in the browser (stretched
@@ -178,6 +181,7 @@ function applyToUI(s) {
   document.getElementById('col0').value = rgbToHex(seg.col[0]);
   document.getElementById('col1').value = rgbToHex(seg.col[1]);
   document.getElementById('col2').value = rgbToHex(seg.col[2]);
+  document.getElementById('scrollText').value = seg.n;
   suppressEcho = false;
 }
 
@@ -239,6 +243,7 @@ document.getElementById('o3').addEventListener('change', e => post({ seg: [{ o3:
 document.getElementById('col0').addEventListener('change', e => post({ seg: [{ col: [hexToRgb(e.target.value)] }] }));
 document.getElementById('col1').addEventListener('change', e => post({ seg: [{ col: [null, hexToRgb(e.target.value)] }] }));
 document.getElementById('col2').addEventListener('change', e => post({ seg: [{ col: [null, null, hexToRgb(e.target.value)] }] }));
+document.getElementById('scrollText').addEventListener('change', e => post({ seg: [{ n: e.target.value }] }));
 
 const loadDiv = document.getElementById('presetLoad');
 const saveDiv = document.getElementById('presetSave');

@@ -5,6 +5,8 @@
 #include <LittleFS.h>
 #include <WiFi.h>
 
+#include <cstring>
+
 #include "display/gu_display.h"
 #include "effects/palettes.h"
 #include "net/device_id.h"
@@ -66,6 +68,7 @@ void JsonApi::serialize_state(JsonObject root) const {
   seg["o2"] = params_.option2;
   seg["o3"] = params_.option3;
   seg["pal"] = params_.palette_id;
+  seg["n"] = params_.name;
   seg["sel"] = true;
 
   JsonArray col = seg["col"].to<JsonArray>();
@@ -174,6 +177,10 @@ void JsonApi::apply_state(JsonObjectConst root) {
     if (seg["o2"].is<bool>()) params_.option2 = seg["o2"].as<bool>();
     if (seg["o3"].is<bool>()) params_.option3 = seg["o3"].as<bool>();
     if (seg["pal"].is<int>()) params_.palette_id = static_cast<uint8_t>(seg["pal"].as<int>());
+    if (seg["n"].is<const char *>()) {
+      strncpy(params_.name, seg["n"].as<const char *>(), effects::Params::kNameSize - 1);
+      params_.name[effects::Params::kNameSize - 1] = '\0';
+    }
 
     JsonArrayConst col = seg["col"];
     if (!col.isNull()) {
