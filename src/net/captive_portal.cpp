@@ -46,11 +46,48 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
 <label>Effect</label>
 <select id="fx"></select>
 
+<label>Palette</label>
+<select id="palette"></select>
+
 <label>Speed <span id="sxVal"></span></label>
 <input type="range" min="0" max="255" id="sx">
 
 <label>Intensity <span id="ixVal"></span></label>
 <input type="range" min="0" max="255" id="ix">
+
+<div class="row">
+  <div>
+    <label>Custom 1 <span id="c1Val"></span></label>
+    <input type="range" min="0" max="255" id="c1">
+  </div>
+  <div>
+    <label>Custom 2 <span id="c2Val"></span></label>
+    <input type="range" min="0" max="255" id="c2">
+  </div>
+  <div>
+    <label>Custom 3 <span id="c3Val"></span></label>
+    <input type="range" min="0" max="255" id="c3">
+  </div>
+</div>
+
+<div class="row" style="margin-top:1rem;">
+  <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0;">
+    <input type="checkbox" id="o1" style="width:auto;"> Option 1
+  </label>
+  <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0;">
+    <input type="checkbox" id="o2" style="width:auto;"> Option 2
+  </label>
+  <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0;">
+    <input type="checkbox" id="o3" style="width:auto;"> Option 3
+  </label>
+</div>
+<p style="font-size:0.75rem;color:#888;margin-top:0.4rem;">
+  "Custom"/"Option" meanings vary per effect - same as real WLED's generic
+  sliders/checkboxes (e.g. Custom 3 is ball count on Bouncing Balls, ghost
+  count on PacMan; Option 1 flips a color mode on Percent). Check the
+  per-effect comment in <code>src/effects/</code> if one seems to do
+  nothing - some effects don't use all of them.
+</p>
 
 <div class="row">
   <div>
@@ -60,6 +97,10 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   <div>
     <label>Secondary</label>
     <input type="color" id="col1" value="#000000">
+  </div>
+  <div>
+    <label>Tertiary</label>
+    <input type="color" id="col2" value="#000000">
   </div>
 </div>
 
@@ -111,12 +152,23 @@ function applyToUI(s) {
   document.getElementById('briVal').textContent = s.bri;
   const seg = s.seg[0];
   document.getElementById('fx').value = seg.fx;
+  document.getElementById('palette').value = seg.pal;
   document.getElementById('sx').value = seg.sx;
   document.getElementById('sxVal').textContent = seg.sx;
   document.getElementById('ix').value = seg.ix;
   document.getElementById('ixVal').textContent = seg.ix;
+  document.getElementById('c1').value = seg.c1;
+  document.getElementById('c1Val').textContent = seg.c1;
+  document.getElementById('c2').value = seg.c2;
+  document.getElementById('c2Val').textContent = seg.c2;
+  document.getElementById('c3').value = seg.c3;
+  document.getElementById('c3Val').textContent = seg.c3;
+  document.getElementById('o1').checked = seg.o1;
+  document.getElementById('o2').checked = seg.o2;
+  document.getElementById('o3').checked = seg.o3;
   document.getElementById('col0').value = rgbToHex(seg.col[0]);
   document.getElementById('col1').value = rgbToHex(seg.col[1]);
+  document.getElementById('col2').value = rgbToHex(seg.col[2]);
   suppressEcho = false;
 }
 
@@ -159,8 +211,25 @@ document.getElementById('ix').addEventListener('input', e => {
   document.getElementById('ixVal').textContent = e.target.value;
   post({ seg: [{ ix: parseInt(e.target.value) }] });
 });
+document.getElementById('palette').addEventListener('change', e => post({ seg: [{ pal: parseInt(e.target.value) }] }));
+document.getElementById('c1').addEventListener('input', e => {
+  document.getElementById('c1Val').textContent = e.target.value;
+  post({ seg: [{ c1: parseInt(e.target.value) }] });
+});
+document.getElementById('c2').addEventListener('input', e => {
+  document.getElementById('c2Val').textContent = e.target.value;
+  post({ seg: [{ c2: parseInt(e.target.value) }] });
+});
+document.getElementById('c3').addEventListener('input', e => {
+  document.getElementById('c3Val').textContent = e.target.value;
+  post({ seg: [{ c3: parseInt(e.target.value) }] });
+});
+document.getElementById('o1').addEventListener('change', e => post({ seg: [{ o1: e.target.checked }] }));
+document.getElementById('o2').addEventListener('change', e => post({ seg: [{ o2: e.target.checked }] }));
+document.getElementById('o3').addEventListener('change', e => post({ seg: [{ o3: e.target.checked }] }));
 document.getElementById('col0').addEventListener('change', e => post({ seg: [{ col: [hexToRgb(e.target.value)] }] }));
 document.getElementById('col1').addEventListener('change', e => post({ seg: [{ col: [null, hexToRgb(e.target.value)] }] }));
+document.getElementById('col2').addEventListener('change', e => post({ seg: [{ col: [null, null, hexToRgb(e.target.value)] }] }));
 
 const loadDiv = document.getElementById('presetLoad');
 const saveDiv = document.getElementById('presetSave');
@@ -247,10 +316,14 @@ refreshStaStatus();
 // endpoint, just for this page) so the dropdown only offers ones that'll
 // actually render something, instead of silently falling back to a flat
 // color when picked.
+// Palettes (unlike effects) are all fully implemented - every one of the
+// 72 real WLED palettes this firmware ports has a working
+// color_from_palette() - so /json/pal needs no implemented-filtering.
 Promise.all([
   fetch('/json/eff').then(r => r.json()),
   fetch('/json/implemented').then(r => r.json()),
-]).then(([names, implemented]) => {
+  fetch('/json/pal').then(r => r.json()),
+]).then(([names, implemented, paletteNames]) => {
   const fx = document.getElementById('fx');
   names.forEach((n, i) => {
     if (!implemented[i]) return;
@@ -258,6 +331,13 @@ Promise.all([
     opt.value = i;
     opt.textContent = n;
     fx.appendChild(opt);
+  });
+  const palette = document.getElementById('palette');
+  paletteNames.forEach((n, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = n;
+    palette.appendChild(opt);
   });
   connectWs();
   fetch('/json/state').then(r => r.json()).then(applyToUI);
