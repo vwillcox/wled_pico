@@ -268,13 +268,21 @@ for (let i = 1; i <= 8; i++) {
 // bytes) - the browser does all the actual image-format decoding via
 // createImageBitmap()/ImageDecoder before this ever runs, so this step
 // itself is just a resize + RGBA-to-RGB strip.
+// One persistent 32x32 canvas, reused across every call (an animated
+// upload calls this once per frame, up to 40 times) - creating a fresh
+// <canvas> element and 2D context each time measured as a real cost at
+// higher source resolutions.
+let g_32Canvas = null, g_32Ctx = null;
 function toRgb32x32(source) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 32;
-  canvas.height = 32;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(source, 0, 0, 32, 32);
-  const rgba = ctx.getImageData(0, 0, 32, 32).data;
+  if (!g_32Canvas) {
+    g_32Canvas = document.createElement('canvas');
+    g_32Canvas.width = 32;
+    g_32Canvas.height = 32;
+    g_32Ctx = g_32Canvas.getContext('2d');
+  }
+  g_32Ctx.clearRect(0, 0, 32, 32);
+  g_32Ctx.drawImage(source, 0, 0, 32, 32);
+  const rgba = g_32Ctx.getImageData(0, 0, 32, 32).data;
   const rgb = new Uint8Array(32 * 32 * 3);
   for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
     rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
@@ -291,19 +299,27 @@ function toRgb32x32(source) {
 // tables, transparency, interlacing, and all 4 disposal methods. Verified
 // against a real 29-frame animated GIF (frame count, per-frame content,
 // and LZW stream lengths all checked) before being trusted here.
+//
+// The dictionary is stored as parallel prefix/suffix typed arrays (a
+// standard prefix-chain LZW dictionary) instead of an array of decoded
+// byte arrays - an earlier version built each new dictionary entry with
+// Array.concat(), which measured 8.7 SECONDS on a real 1080x1080/40-frame
+// GIF (long enough to trip a browser's "unresponsive script" warning,
+// which silently kills the whole decode). This version does no
+// allocation in the hot loop at all.
 function lzwDecode(minCodeSize, data, pixelCount) {
   const output = new Uint8Array(pixelCount);
-  let outPos = 0;
   const clearCode = 1 << minCodeSize;
   const eoiCode = clearCode + 1;
-  let dict, codeSize, nextCode;
-  function resetDict() {
-    dict = new Array(4096);
-    for (let i = 0; i < clearCode; i++) dict[i] = [i];
-    nextCode = clearCode + 2;
-    codeSize = minCodeSize + 1;
-  }
+  const maxEntries = 4096;
+  const prefix = new Int16Array(maxEntries);  // prefix[code] = the code it extends
+  const suffix = new Uint8Array(maxEntries);  // suffix[code] = the pixel it appends
+  const stack = new Uint8Array(maxEntries);   // scratch space for expanding one code
+
+  let nextCode, codeSize;
+  function resetDict() { nextCode = clearCode + 2; codeSize = minCodeSize + 1; }
   resetDict();
+
   let bitBuf = 0, bitCount = 0, pos = 0;
   function readCode() {
     while (bitCount < codeSize) {
@@ -315,27 +331,47 @@ function lzwDecode(minCodeSize, data, pixelCount) {
     bitCount -= codeSize;
     return code;
   }
-  let prevEntry = null;
+
+  let outPos = 0, oldCode = -1;
   while (pos < data.length && outPos < pixelCount) {
     const code = readCode();
-    if (code === clearCode) { resetDict(); prevEntry = null; continue; }
+    if (code === clearCode) { resetDict(); oldCode = -1; continue; }
     if (code === eoiCode) break;
-    let entry;
-    if (code < nextCode && dict[code]) entry = dict[code];
-    else if (code === nextCode && prevEntry) entry = prevEntry.concat([prevEntry[0]]);
-    else break;  // corrupt stream - stop, keep whatever decoded so far
-    for (let i = 0; i < entry.length && outPos < pixelCount; i++) output[outPos++] = entry[i];
-    if (prevEntry && nextCode < 4096) {
-      dict[nextCode] = prevEntry.concat([entry[0]]);
+
+    // Expand `code` (or, for the KwKwK special case, `oldCode` plus its
+    // own first pixel) into `stack`, in reverse output order.
+    let sp, firstPixel;
+    if (code < nextCode) {
+      sp = 0;
+      let c = code;
+      while (c >= clearCode) { stack[sp++] = suffix[c]; c = prefix[c]; }
+      stack[sp++] = c;  // root: the code itself is the pixel value
+      firstPixel = stack[sp - 1];
+    } else if (code === nextCode && oldCode !== -1) {
+      sp = 0;
+      let c = oldCode;
+      while (c >= clearCode) { stack[sp++] = suffix[c]; c = prefix[c]; }
+      stack[sp++] = c;
+      firstPixel = stack[sp - 1];
+      stack[sp++] = firstPixel;
+    } else {
+      break;  // corrupt stream - stop, keep whatever decoded so far
+    }
+
+    for (let i = sp - 1; i >= 0 && outPos < pixelCount; i--) output[outPos++] = stack[i];
+
+    if (oldCode !== -1 && nextCode < maxEntries) {
+      prefix[nextCode] = oldCode;
+      suffix[nextCode] = firstPixel;
       nextCode++;
       if (nextCode === (1 << codeSize) && codeSize < 12) codeSize++;
     }
-    prevEntry = entry;
+    oldCode = code;
   }
   return output;
 }
 
-function parseGifFrames(buf) {
+async function parseGifFrames(buf, maxFrames) {
   const data = new Uint8Array(buf);
   let p = 0;
   const u8 = () => data[p++];
@@ -381,7 +417,8 @@ function parseGifFrames(buf) {
     pendingDisposal = null;
   }
 
-  while (p < data.length) {
+  let lastYield = performance.now();
+  while (p < data.length && frames.length < maxFrames) {
     const block = u8();
     if (block === 0x3B) break;  // trailer
     if (block === 0x21) {  // extension
@@ -454,9 +491,21 @@ function parseGifFrames(buf) {
         }
       }
 
-      frames.push({ delayMs: gceDelay || 100, pixels: canvas.slice() });
+      // Resize to the device's 32x32 immediately and keep only that -
+      // holding all (up to 40) full-resolution RGBA frames alive at once
+      // would mean ~4.6MB apiece for a 1080x1080 source, ~186MB total.
+      frames.push({ delayMs: gceDelay || 100, rgb: resizeRgbaTo32(canvas, screenW, screenH) });
       pendingDisposal = { left, top, w, h, method: gceDisposal };
       gceDelay = 0; gceTransparentFlag = false; gceDisposal = 0; gceTransparentIndex = -1;
+
+      // A large or many-frame GIF can take long enough to decode that a
+      // browser's slow-script watchdog would silently kill the whole page
+      // mid-decode - yielding periodically resets that clock and lets the
+      // "decoding..." status text actually paint in the meantime.
+      if (performance.now() - lastYield > 50) {
+        await new Promise(r => setTimeout(r, 0));
+        lastYield = performance.now();
+      }
       continue;
     }
     break;  // unrecognized block - stop rather than risk misreading the rest
@@ -465,14 +514,24 @@ function parseGifFrames(buf) {
 }
 
 // Resizes one already-decoded full-canvas RGBA frame down to 32x32 RGB via
-// an offscreen <canvas> (for the scaling quality/convenience, not decode -
-// the pixels are already plain RGBA from parseGifFrames() above).
+// an offscreen <canvas> (for the scaling quality/convenience, not decode).
+// Reuses one persistent canvas across calls, since this runs once per
+// animation frame (up to 40 times) at the source's full resolution -
+// allocating a fresh canvas element every time measured as a real cost
+// at higher resolutions (e.g. 1080x1080 sources).
+let g_fullCanvas = null, g_fullCtx = null;
 function resizeRgbaTo32(pixels, w, h) {
-  const full = document.createElement('canvas');
-  full.width = w;
-  full.height = h;
-  full.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels), w, h), 0, 0);
-  return toRgb32x32(full);
+  if (!g_fullCanvas || g_fullCanvas.width !== w || g_fullCanvas.height !== h) {
+    g_fullCanvas = document.createElement('canvas');
+    g_fullCanvas.width = w;
+    g_fullCanvas.height = h;
+    g_fullCtx = g_fullCanvas.getContext('2d');
+  }
+  // pixels is already a Uint8ClampedArray of the right size (the parser's
+  // composited canvas buffer) - avoid a second full-frame copy into a new one.
+  const clamped = pixels instanceof Uint8ClampedArray ? pixels : new Uint8ClampedArray(pixels);
+  g_fullCtx.putImageData(new ImageData(clamped, w, h), 0, 0);
+  return toRgb32x32(g_fullCanvas);
 }
 
 // kMaxFramesClient here and below must match effects::kMaxFrames
@@ -481,12 +540,9 @@ async function decodeGifFramesManually(file) {
   const kMaxFramesClient = 40;
   try {
     const buf = await file.arrayBuffer();
-    const parsed = parseGifFrames(buf);
+    const parsed = await parseGifFrames(buf, kMaxFramesClient);
     if (!parsed || parsed.frames.length <= 1) return null;
-    return parsed.frames.slice(0, kMaxFramesClient).map(f => ({
-      delayMs: f.delayMs,
-      rgb: resizeRgbaTo32(f.pixels, parsed.width, parsed.height),
-    }));
+    return parsed.frames;
   } catch (err) {
     return null;
   }
@@ -502,7 +558,14 @@ async function decodeAnimatedFrames(file) {
   const kMaxFramesClient = 40;
   if (!('ImageDecoder' in window)) return null;
   let decoder;
-  try {
+  // A hard timeout around the whole decode: this app has already been
+  // bitten once by a decode path that measured fine in isolation but ran
+  // long enough on a real file to trip a browser's slow-script guard and
+  // silently abort with no error - if that ever happens here too, fail
+  // fast and let the caller fall through to the sampling path instead of
+  // hanging indefinitely.
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('decodeAnimatedFrames timed out')), 5000));
+  const work = (async () => {
     const buf = await file.arrayBuffer();
     decoder = new ImageDecoder({ data: buf, type: file.type || 'image/gif' });
     await decoder.tracks.ready;
@@ -519,6 +582,9 @@ async function decodeAnimatedFrames(file) {
       frames.push({ delayMs, rgb });
     }
     return frames;
+  })();
+  try {
+    return await Promise.race([work, timeout]);
   } catch (err) {
     return null;  // fall back to the still-frame path
   } finally {
@@ -549,6 +615,7 @@ async function decodeAnimatedFramesBySampling(file) {
     // Must actually be rendered (not display:none) for most browsers to
     // keep animating it - parked off-screen instead of made invisible.
     img.style.position = 'fixed';
+    img.style.top = '-9999px';
     img.style.left = '-9999px';
     document.body.appendChild(img);
 
