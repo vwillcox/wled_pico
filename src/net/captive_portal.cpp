@@ -112,11 +112,9 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   Any image file - it's resized to 32x32 right here in the browser (stretched
   to fill, not cropped) before uploading, so this device never has to decode
   a JPEG/PNG/GIF itself. Animated GIFs play back too, up to 40 frames -
-  Chrome/Edge/desktop Firefox decode every real frame and its exact timing;
-  other browsers (older Firefox, Firefox on Android, Safari) instead play
-  the GIF natively for a few seconds and record what's on screen, which
-  looks right for most animations but won't perfectly match an unusual
-  loop point or exact per-frame timing. Select the "Image" effect above to
+  decoded frame-by-frame by a small GIF parser built into this page, so it
+  works the same in every browser rather than depending on one browser's
+  decode APIs. Select the "Image" effect above to
   display it.
 </p>
 <input type="file" id="imageFile" accept="image/*">
@@ -284,13 +282,222 @@ function toRgb32x32(source) {
   return rgb;
 }
 
-// Decodes every frame of an animated image (GIF) via the WebCodecs
-// ImageDecoder API - this is what does the actual GIF/LZW decoding, not
-// this firmware. Returns [{delayMs, rgb}, ...], or null if this browser
-// doesn't support ImageDecoder, the file isn't multi-frame, or decoding
-// otherwise fails (caller falls back to a single still frame either way).
-// kMaxFramesClient must match effects::kMaxFrames (image_data.h) - kept in
-// sync by comment, not code.
+// A from-scratch GIF87a/89a parser + LZW decoder, run entirely in this
+// page - no browser decode API dependency at all, so it works identically
+// in every browser (this exists because WebCodecs ImageDecoder support
+// for the GIF codec specifically turned out not to be reliable enough
+// across browsers to depend on - see decodeAnimatedFrames() below, kept
+// as a fallback for other animated formats). Handles global/local color
+// tables, transparency, interlacing, and all 4 disposal methods. Verified
+// against a real 29-frame animated GIF (frame count, per-frame content,
+// and LZW stream lengths all checked) before being trusted here.
+function lzwDecode(minCodeSize, data, pixelCount) {
+  const output = new Uint8Array(pixelCount);
+  let outPos = 0;
+  const clearCode = 1 << minCodeSize;
+  const eoiCode = clearCode + 1;
+  let dict, codeSize, nextCode;
+  function resetDict() {
+    dict = new Array(4096);
+    for (let i = 0; i < clearCode; i++) dict[i] = [i];
+    nextCode = clearCode + 2;
+    codeSize = minCodeSize + 1;
+  }
+  resetDict();
+  let bitBuf = 0, bitCount = 0, pos = 0;
+  function readCode() {
+    while (bitCount < codeSize) {
+      bitBuf |= (pos < data.length ? data[pos++] : 0) << bitCount;
+      bitCount += 8;
+    }
+    const code = bitBuf & ((1 << codeSize) - 1);
+    bitBuf >>= codeSize;
+    bitCount -= codeSize;
+    return code;
+  }
+  let prevEntry = null;
+  while (pos < data.length && outPos < pixelCount) {
+    const code = readCode();
+    if (code === clearCode) { resetDict(); prevEntry = null; continue; }
+    if (code === eoiCode) break;
+    let entry;
+    if (code < nextCode && dict[code]) entry = dict[code];
+    else if (code === nextCode && prevEntry) entry = prevEntry.concat([prevEntry[0]]);
+    else break;  // corrupt stream - stop, keep whatever decoded so far
+    for (let i = 0; i < entry.length && outPos < pixelCount; i++) output[outPos++] = entry[i];
+    if (prevEntry && nextCode < 4096) {
+      dict[nextCode] = prevEntry.concat([entry[0]]);
+      nextCode++;
+      if (nextCode === (1 << codeSize) && codeSize < 12) codeSize++;
+    }
+    prevEntry = entry;
+  }
+  return output;
+}
+
+function parseGifFrames(buf) {
+  const data = new Uint8Array(buf);
+  let p = 0;
+  const u8 = () => data[p++];
+  const u16 = () => { const v = data[p] | (data[p + 1] << 8); p += 2; return v; };
+
+  const sig = String.fromCharCode(data[0], data[1], data[2], data[3], data[4], data[5]);
+  if (sig !== 'GIF87a' && sig !== 'GIF89a') return null;
+  p = 6;
+  const screenW = u16(), screenH = u16();
+  const packed = u8();
+  const gctFlag = (packed & 0x80) !== 0;
+  const gctSize = 2 << (packed & 0x07);
+  u8();  // background color index, unused
+  p++;   // pixel aspect ratio, unused
+  let gct = null;
+  if (gctFlag) {
+    gct = new Uint8Array(gctSize * 3);
+    for (let i = 0; i < gctSize * 3; i++) gct[i] = u8();
+  }
+
+  const canvas = new Uint8ClampedArray(screenW * screenH * 4);  // RGBA, composited across frames
+  let savedRegion = null;  // for disposal method 3 (restore to previous)
+  const frames = [];
+  let gceDelay = 0, gceTransparentIndex = -1, gceDisposal = 0, gceTransparentFlag = false;
+  let pendingDisposal = null;
+
+  function applyPendingDisposal() {
+    if (!pendingDisposal) return;
+    const { left, top, w, h, method } = pendingDisposal;
+    if (method === 2) {
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const idx = ((top + y) * screenW + (left + x)) * 4;
+        canvas[idx] = canvas[idx + 1] = canvas[idx + 2] = canvas[idx + 3] = 0;
+      }
+    } else if (method === 3 && savedRegion) {
+      let si = 0;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const idx = ((top + y) * screenW + (left + x)) * 4;
+        canvas[idx] = savedRegion[si++]; canvas[idx + 1] = savedRegion[si++];
+        canvas[idx + 2] = savedRegion[si++]; canvas[idx + 3] = savedRegion[si++];
+      }
+    }
+    pendingDisposal = null;
+  }
+
+  while (p < data.length) {
+    const block = u8();
+    if (block === 0x3B) break;  // trailer
+    if (block === 0x21) {  // extension
+      const label = u8();
+      if (label === 0xF9) {  // graphic control extension
+        u8();  // block size, always 4
+        const packed2 = u8();
+        gceDisposal = (packed2 >> 2) & 0x07;
+        gceTransparentFlag = (packed2 & 0x01) !== 0;
+        gceDelay = u16() * 10;  // centiseconds -> ms
+        gceTransparentIndex = u8();
+        u8();  // terminator
+      } else {
+        if (label === 0x01) { const sz = u8(); p += sz; }  // plain text's fixed header
+        let sz;
+        while ((sz = u8()) !== 0) p += sz;  // any sub-blocks we don't otherwise care about
+      }
+      continue;
+    }
+    if (block === 0x2C) {  // image descriptor - one frame
+      applyPendingDisposal();
+      const left = u16(), top = u16(), w = u16(), h = u16();
+      const packed3 = u8();
+      const lctFlag = (packed3 & 0x80) !== 0;
+      const interlace = (packed3 & 0x40) !== 0;
+      const lctSize = 2 << (packed3 & 0x07);
+      let colorTable = gct;
+      if (lctFlag) {
+        colorTable = new Uint8Array(lctSize * 3);
+        for (let i = 0; i < lctSize * 3; i++) colorTable[i] = u8();
+      }
+      const minCodeSize = u8();
+      const chunks = [];
+      let sz, total = 0;
+      while ((sz = u8()) !== 0) { chunks.push(data.subarray(p, p + sz)); total += sz; p += sz; }
+      const lzwData = new Uint8Array(total);
+      { let off = 0; for (const c of chunks) { lzwData.set(c, off); off += c.length; } }
+
+      const indices = lzwDecode(minCodeSize, lzwData, w * h);
+
+      let rowOrder = null;
+      if (interlace) {
+        rowOrder = [];
+        for (let y = 0; y < h; y += 8) rowOrder.push(y);
+        for (let y = 4; y < h; y += 8) rowOrder.push(y);
+        for (let y = 2; y < h; y += 4) rowOrder.push(y);
+        for (let y = 1; y < h; y += 2) rowOrder.push(y);
+      }
+
+      if (gceDisposal === 3) {
+        savedRegion = new Uint8ClampedArray(w * h * 4);
+        let si = 0;
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+          const idx = ((top + y) * screenW + (left + x)) * 4;
+          savedRegion[si++] = canvas[idx]; savedRegion[si++] = canvas[idx + 1];
+          savedRegion[si++] = canvas[idx + 2]; savedRegion[si++] = canvas[idx + 3];
+        }
+      }
+
+      for (let row = 0; row < h; row++) {
+        const destRow = interlace ? rowOrder[row] : row;
+        for (let col = 0; col < w; col++) {
+          const colorIdx = indices[row * w + col];
+          if (gceTransparentFlag && colorIdx === gceTransparentIndex) continue;  // leave underlying pixel as-is
+          const cx = left + col, cy = top + destRow;
+          if (cx < 0 || cx >= screenW || cy < 0 || cy >= screenH) continue;
+          const idx = (cy * screenW + cx) * 4;
+          const ci = colorIdx * 3;
+          canvas[idx] = colorTable[ci]; canvas[idx + 1] = colorTable[ci + 1]; canvas[idx + 2] = colorTable[ci + 2]; canvas[idx + 3] = 255;
+        }
+      }
+
+      frames.push({ delayMs: gceDelay || 100, pixels: canvas.slice() });
+      pendingDisposal = { left, top, w, h, method: gceDisposal };
+      gceDelay = 0; gceTransparentFlag = false; gceDisposal = 0; gceTransparentIndex = -1;
+      continue;
+    }
+    break;  // unrecognized block - stop rather than risk misreading the rest
+  }
+  return { width: screenW, height: screenH, frames };
+}
+
+// Resizes one already-decoded full-canvas RGBA frame down to 32x32 RGB via
+// an offscreen <canvas> (for the scaling quality/convenience, not decode -
+// the pixels are already plain RGBA from parseGifFrames() above).
+function resizeRgbaTo32(pixels, w, h) {
+  const full = document.createElement('canvas');
+  full.width = w;
+  full.height = h;
+  full.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels), w, h), 0, 0);
+  return toRgb32x32(full);
+}
+
+// kMaxFramesClient here and below must match effects::kMaxFrames
+// (image_data.h) - kept in sync by comment, not code.
+async function decodeGifFramesManually(file) {
+  const kMaxFramesClient = 40;
+  try {
+    const buf = await file.arrayBuffer();
+    const parsed = parseGifFrames(buf);
+    if (!parsed || parsed.frames.length <= 1) return null;
+    return parsed.frames.slice(0, kMaxFramesClient).map(f => ({
+      delayMs: f.delayMs,
+      rgb: resizeRgbaTo32(f.pixels, parsed.width, parsed.height),
+    }));
+  } catch (err) {
+    return null;
+  }
+}
+
+// Decodes every frame of an animated image via the WebCodecs ImageDecoder
+// API - kept as a fallback for animated formats the GIF parser above
+// doesn't handle (WEBP) or if that parser ever hits a GIF variant it
+// doesn't understand. Returns [{delayMs, rgb}, ...], or null if this
+// browser doesn't support ImageDecoder, the file isn't multi-frame, or
+// decoding otherwise fails (caller falls back further either way).
 async function decodeAnimatedFrames(file) {
   const kMaxFramesClient = 40;
   if (!('ImageDecoder' in window)) return null;
@@ -372,7 +579,14 @@ document.getElementById('imageFile').addEventListener('change', async e => {
   const imgStatus = document.getElementById('imageStatus');
   try {
     imgStatus.textContent = 'decoding…';
-    let frames = await decodeAnimatedFrames(file);
+    // GIF gets its own from-scratch parser first (see decodeGifFramesManually
+    // above for why: no browser decode API dependency, so it works the same
+    // in every browser) - it checks the file's actual signature itself and
+    // returns null immediately for anything else, so trying it unconditionally
+    // is cheap. ImageDecoder and the sampling fallback below exist for other
+    // animated formats (WEBP) or the rare GIF variant the parser doesn't handle.
+    let frames = await decodeGifFramesManually(file);
+    if (!frames) frames = await decodeAnimatedFrames(file);
     // Only worth a 3-second sampling pass for formats that can actually
     // animate - skip it for a plain JPEG/PNG/etc, which would just burn
     // the wait and correctly find nothing.
