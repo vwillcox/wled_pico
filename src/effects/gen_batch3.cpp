@@ -602,6 +602,28 @@ void mode_fillnoise8(uint32_t now_ms, const Params &p, State &state, Frame frame
 }
 EFFECTS_REGISTER(Id::kFillnoise8, mode_fillnoise8)
 
+// wled00/FX.cpp:4361 mode_noisepal(). Drops the "generate 2 random
+// CRGBPalette16s and cross-fade between them every 4-6.5s" machinery real
+// WLED falls back to only when no palette is explicitly selected (it uses
+// SEGPALETTE directly otherwise) - this firmware's palette 0 is already a
+// colorful default (same precedent as gen_batch2.cpp's mode_popcorn), so
+// every pixel just looks its noise value up through whichever palette is
+// selected, same shape as mode_fillnoise8() just above. Real WLED's Speed
+// slider only controls how often a new random palette gets picked, which
+// has nothing left to do here as a result - unused, same as its "Scale"
+// (this port's Intensity) is the one that actually matters, per the
+// original's own "@!,Scale" parameter labels.
+void mode_noisepal(uint32_t now_ms, const Params &p, State &state, Frame frame) {
+  constexpr int width = GuDisplay::WIDTH;
+  unsigned scale = 15 + (p.intensity >> 2);
+  for (int i = 0; i < width; i++) {
+    uint8_t index = perlin8(static_cast<uint32_t>(i) * scale, state.aux0 + static_cast<uint32_t>(i) * scale);
+    fill_column(frame, i, color_from_palette(p.palette_id, index, p.primary, p.secondary, p.tertiary));
+  }
+  state.aux0 = static_cast<uint16_t>(state.aux0 + beatsin8(now_ms, 10, 1, 4));
+}
+EFFECTS_REGISTER(Id::kNoisepal, mode_noisepal)
+
 // wled00/FX.cpp:2237 mode_noise16_1()
 void mode_noise16_1(uint32_t now_ms, const Params &p, State &state, Frame frame) {
   constexpr int width = GuDisplay::WIDTH;

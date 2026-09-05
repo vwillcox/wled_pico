@@ -430,6 +430,35 @@ void mode_2d_frizzles(uint32_t now_ms, const Params &p, State &, Frame frame) {
 }
 EFFECTS_REGISTER(Id::k2dfrizzles, mode_2d_frizzles)
 
+// wled00/FX.cpp:5681 mode_2DLissajous(). Real WLED's isMatrix/is2D() guard
+// always passes on this board, dropped as dead per this batch's convention
+// (see mode_2d_frizzles() above for the same). Traces a classic Lissajous
+// curve (two out-of-phase sine waves, one per axis) across the matrix,
+// slowly rotating; param naming in real WLED is confusing here - "Speed"
+// (this port's p.speed) is actually the curve's X-axis frequency, while
+// the rotation rate real WLED calls "Speed" is custom3, matching upstream's
+// own "@X frequency,Fade rate,Blur,,Speed,Smear" metadata string exactly.
+void mode_2d_lissajous(uint32_t now_ms, const Params &p, State &, Frame frame) {
+  fade_to_black_by(frame, p.intensity);
+  uint32_t phase = (now_ms * (1 + p.custom3)) / 32;
+
+  for (int i = 0; i < 256; i++) {
+    uint8_t xlocn = sin8(static_cast<uint8_t>(phase / 2 + (i * p.speed) / 32));
+    uint8_t ylocn = cos8(static_cast<uint8_t>(phase / 2 + i * 2));
+    // Arduino map(2*loc, 0,511, 0,2*(dim-1)), then rounded via (+1)/2 -
+    // reproduced arithmetically rather than pulling in a generic map()
+    // helper this file doesn't otherwise need.
+    int x = (((2 * static_cast<int>(xlocn)) * (2 * (kW - 1))) / 511 + 1) / 2;
+    int y = (((2 * static_cast<int>(ylocn)) * (2 * (kH - 1))) / 511 + 1) / 2;
+    if (x < 0) x = 0; else if (x >= kW) x = kW - 1;
+    if (y < 0) y = 0; else if (y >= kH) y = kH - 1;
+    frame[y][x] = color_from_palette(p.palette_id, static_cast<uint8_t>(now_ms / 100 + i), p.primary, p.secondary,
+                                      p.tertiary);
+  }
+  blur2d(frame, static_cast<uint8_t>(p.custom1 >> (1 + (p.option1 ? 3 : 0))), p.option1);
+}
+EFFECTS_REGISTER(Id::k2dlissajous, mode_2d_lissajous)
+
 // wled00/FX.cpp:5855 mode_2DPlasmaball()
 void mode_2d_plasma_ball(uint32_t now_ms, const Params &p, State &, Frame frame) {
   fade_to_black_by(frame, static_cast<uint8_t>(p.custom1 >> 2));
