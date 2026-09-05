@@ -31,6 +31,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   button { margin-top: 1rem; width: 100%; padding: 0.6rem; font-size: 1rem; background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; }
   .presets { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
   .presets button { width: auto; flex: 1 0 20%; margin-top: 0; }
+  .presets.delete button { background: #422; color: #f88; }
   #status { font-size: 0.8rem; color: #888; margin-top: 0.5rem; }
 </style>
 </head>
@@ -141,6 +142,8 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
 <h2>Presets</h2>
 <div class="presets" id="presetLoad"></div>
 <div class="presets" id="presetSave"></div>
+<div class="presets delete" id="presetDelete"></div>
+<div id="presetStatus" style="font-size:0.8rem;color:#888;margin-top:0.5rem;"></div>
 
 <h2>Firmware update</h2>
 <form id="otaForm">
@@ -249,18 +252,62 @@ document.getElementById('col1').addEventListener('change', e => post({ seg: [{ c
 document.getElementById('col2').addEventListener('change', e => post({ seg: [{ col: [null, null, hexToRgb(e.target.value)] }] }));
 document.getElementById('scrollText').addEventListener('change', e => post({ seg: [{ n: e.target.value }] }));
 
+// Preset buttons go over a plain fetch (not the post() helper's WebSocket
+// path) specifically so each click gets its own response to react to here
+// - ps/psave/pdel all succeed or no-op silently at the protocol level
+// (loading an empty slot just leaves state unchanged), so the only way to
+// tell a click actually did anything is to check the state that comes
+// back. The device still broadcasts the resulting state to every
+// connected client over the WebSocket as normal either way.
+async function presetRequest(body) {
+  const res = await fetch('/json/state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const s = await res.json();
+  applyToUI(s);
+  return s;
+}
+
+const presetStatus = document.getElementById('presetStatus');
 const loadDiv = document.getElementById('presetLoad');
 const saveDiv = document.getElementById('presetSave');
+const deleteDiv = document.getElementById('presetDelete');
 for (let i = 1; i <= 8; i++) {
   const l = document.createElement('button');
   l.textContent = 'Load ' + i;
-  l.addEventListener('click', () => post({ ps: i }));
+  l.addEventListener('click', async () => {
+    presetStatus.textContent = 'loading slot ' + i + '…';
+    try {
+      const s = await presetRequest({ ps: i });
+      presetStatus.textContent = s.ps === i ? ('loaded slot ' + i) : ('slot ' + i + ' is empty');
+    } catch (err) { presetStatus.textContent = 'failed: ' + err; }
+  });
   loadDiv.appendChild(l);
 
   const s = document.createElement('button');
   s.textContent = 'Save ' + i;
-  s.addEventListener('click', () => post({ psave: i }));
+  s.addEventListener('click', async () => {
+    presetStatus.textContent = 'saving to slot ' + i + '…';
+    try {
+      await presetRequest({ psave: i });
+      presetStatus.textContent = 'saved to slot ' + i;
+    } catch (err) { presetStatus.textContent = 'failed: ' + err; }
+  });
   saveDiv.appendChild(s);
+
+  const d = document.createElement('button');
+  d.textContent = 'Delete ' + i;
+  d.addEventListener('click', async () => {
+    if (!confirm('Delete preset ' + i + '?')) return;
+    presetStatus.textContent = 'deleting slot ' + i + '…';
+    try {
+      await presetRequest({ pdel: i });
+      presetStatus.textContent = 'deleted slot ' + i;
+    } catch (err) { presetStatus.textContent = 'failed: ' + err; }
+  });
+  deleteDiv.appendChild(d);
 }
 
 // Draws `source` (an ImageBitmap or a decoded ImageDecoder VideoFrame) onto
