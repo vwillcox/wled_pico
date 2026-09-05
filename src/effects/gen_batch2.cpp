@@ -263,6 +263,137 @@ void mode_rain(uint32_t now_ms, const Params &p, State &state, Frame frame) {
 }
 EFFECTS_REGISTER(Id::kRain, mode_rain)
 
+// wled00/FX.cpp:3731 mode_exploding_fireworks() ("Fireworks 1D" in real
+// WLED's own effect list, despite having a full 2D branch it uses whenever
+// SEGMENT.is2D() - true on this board - so this ports that branch only,
+// same convention as mode_fireworks()/mode_rain() above. A rocket ("flare")
+// launches from a random column, climbs with a shrinking upward velocity
+// under gravity, then at its peak spawns a burst of sparks that fly out
+// ballistically and fade from white through the palette color to black -
+// this is what was previously missing (falling back to a solid full-screen
+// fill instead), which is why unimplemented showed up as "a full screen of
+// colours" rather than the sparse rocket-and-burst this effect should be.
+//
+// Same struct/field layout as upstream's `spark` (also shared there with
+// Popcorn/Drip) - not reused from this codebase's own PopcornKernel/
+// DripDrop (gen_batch5.cpp) since none of the three share a common type
+// upstream either, just convention.
+struct Spark {
+  float pos, posX;
+  float vel, velX;
+  uint16_t col;
+  uint8_t colIndex;
+};
+
+// Upstream sizes its spark array from free heap (variable per board/build);
+// this board's frame size never changes, so it's sized once from this
+// effect's fixed State::data budget instead - sparks[0] doubles as the
+// flare, same as upstream.
+constexpr int kMaxFireworkSparks = static_cast<int>((State::kDataSize - sizeof(float)) / sizeof(Spark));
+struct ExplodingFireworksState {
+  Spark sparks[kMaxFireworkSparks];
+  float dying_gravity;
+};
+static_assert(sizeof(ExplodingFireworksState) <= State::kDataSize, "ExplodingFireworksState too big");
+
+void mode_exploding_fireworks(uint32_t, const Params &p, State &state, Frame frame) {
+  constexpr int width = GuDisplay::WIDTH;
+  constexpr int height = GuDisplay::HEIGHT;
+  auto &s = *reinterpret_cast<ExplodingFireworksState *>(state.data);
+  Spark &flare = s.sparks[0];  // sparks[0] is the flare, not a burst spark - matches upstream
+
+  float gravity = -0.0004f - (p.speed / 800000.0f);
+  gravity *= height;
+
+  fade_out_frame(frame, p.secondary, 252);
+
+  if (state.aux0 < 2) {  // FLARE
+    if (state.aux0 == 0) {
+      flare.pos = 0;
+      flare.posX = static_cast<float>(random8(2, static_cast<uint8_t>(width - 3)));
+      unsigned peak_height = 75 + random8(180);
+      peak_height = (peak_height * static_cast<unsigned>(height - 1)) >> 8;
+      flare.vel = sqrtf(-2.0f * gravity * static_cast<float>(peak_height));
+      flare.velX = (static_cast<int>(random8(9)) - 4) / 64.0f;
+      flare.col = 255;
+      state.aux0 = 1;
+    }
+
+    if (flare.vel > 12 * gravity) {
+      int fx = static_cast<int>(flare.posX);
+      int fy = height - static_cast<int>(flare.pos) - 1;
+      if (fx >= 0 && fx < width && fy >= 0 && fy < height) {
+        uint8_t b = static_cast<uint8_t>(flare.col);
+        frame[fy][fx] = Rgb{b, b, b};
+      }
+      flare.pos += flare.vel;
+      flare.pos = std::max(0.0f, std::min(flare.pos, static_cast<float>(height - 1)));
+      flare.posX += flare.velX;
+      flare.posX = std::max(0.0f, std::min(flare.posX, static_cast<float>(width - 1)));
+      flare.vel += gravity;
+      flare.col = static_cast<uint16_t>(flare.col - 2);
+    } else {
+      state.aux0 = 2;  // ready to explode
+    }
+  } else if (state.aux0 < 4) {
+    // Explode! Size is proportional to the height the flare reached.
+    unsigned n_sparks = static_cast<unsigned>(flare.pos) + random8(4);
+    n_sparks = std::max(n_sparks, 4u);
+    n_sparks = std::min(n_sparks, static_cast<unsigned>(kMaxFireworkSparks));
+
+    if (state.aux0 == 2) {
+      for (unsigned i = 1; i < n_sparks; i++) {
+        Spark &sp = s.sparks[i];
+        sp.pos = flare.pos;
+        sp.posX = flare.posX;
+        sp.vel = (static_cast<float>(random16(20001)) / 10000.0f) - 0.9f;  // -0.9 to 1.1
+        sp.velX = (static_cast<float>(random16(20001)) / 10000.0f) - 1.0f;  // -1 to 1
+        sp.col = 345;  // set before scaling velocity below, to keep colors bright
+        sp.colIndex = random8();
+        sp.vel *= flare.pos / height;    // proportional to height
+        sp.velX *= flare.posX / width;   // proportional to width
+        sp.vel *= -gravity * 50;
+      }
+      s.dying_gravity = gravity / 2.0f;
+      state.aux0 = 3;
+    }
+
+    if (s.sparks[1].col > 4) {  // as long as the known spark (index 1) is lit, animate all of them
+      for (unsigned i = 1; i < n_sparks; i++) {
+        Spark &sp = s.sparks[i];
+        sp.pos += sp.vel;
+        sp.posX += sp.velX;
+        sp.vel += s.dying_gravity;
+        sp.velX += s.dying_gravity;
+        if (sp.col > 3) sp.col = static_cast<uint16_t>(sp.col - 4);
+
+        if (sp.pos > 0 && sp.pos < height && sp.posX >= 0 && sp.posX < width) {
+          unsigned prog = sp.col;
+          Rgb spark_color = color_from_palette(p.palette_id, sp.colIndex, p.primary, p.secondary, p.tertiary);
+          Rgb c{0, 0, 0};
+          if (prog > 300) {  // fade from spark color to white
+            c = blend(spark_color, Rgb{255, 255, 255}, static_cast<uint8_t>((prog - 300) * 5));
+          } else if (prog > 45) {  // fade from black to spark color, then cool toward black
+            c = blend(Rgb{0, 0, 0}, spark_color, static_cast<uint8_t>(prog - 45));
+            unsigned cooling = (300 - prog) >> 5;
+            c.g = qsub8(c.g, static_cast<uint8_t>(cooling));
+            c.b = qsub8(c.b, static_cast<uint8_t>(cooling * 2));
+          }
+          frame[height - static_cast<int>(sp.pos) - 1][static_cast<int>(sp.posX)] = c;
+        }
+      }
+      if (p.option3) blur2d(frame, 16);
+      s.dying_gravity *= 0.8f;  // as sparks burn out they fall slower
+    } else {
+      state.aux0 = static_cast<uint16_t>(6 + random8(10));  // wait this many frames before the next flare
+    }
+  } else {
+    state.aux0--;
+    if (state.aux0 < 4) state.aux0 = 0;  // back to flare
+  }
+}
+EFFECTS_REGISTER(Id::kExplodingFireworks, mode_exploding_fireworks)
+
 // wled00/FX.cpp:3961 mode_tetrix(). On a 2D segment WLED runs one
 // independent falling-brick "virtual strip" per column (nrOfVStrips()) -
 // this board is always 2D, so that's genuinely 32 independent columns,
