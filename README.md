@@ -220,9 +220,9 @@ src/
     gen_particles_1d.cpp      11 1D Particle System effects built on the engine above
     font_tom_thumb.h          embedded 3x6px bitmap font (real WLED's own default)
     gen_scrolltext.cpp        the "Scrolling Text" effect, built on the font above
-    image_data.h / .cpp       backing store for the "Image" effect - a 32x32 RGB buffer the
-                              control page fills by drawing an uploaded image onto a <canvas>
-                              (browser handles JPEG/PNG/GIF decoding) and POSTing the raw pixels
+    image_data.h / .cpp       backing store for the "Image" effect - up to 40 32x32 RGB frames
+                              (animation included) the control page decodes in-browser (WebCodecs
+                              ImageDecoder for animated GIFs, <canvas> otherwise) and uploads raw
   net/
     captive_portal.h / .cpp   WiFi AP + wildcard DNS + the served control page
     device_id.h / .cpp        shared colon-free/lowercase MAC helper (mDNS TXT, /json/info)
