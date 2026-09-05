@@ -111,11 +111,13 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
 <p style="font-size:0.8rem;color:#888;">
   Any image file - it's resized to 32x32 right here in the browser (stretched
   to fill, not cropped) before uploading, so this device never has to decode
-  a JPEG/PNG/GIF itself. Animated GIFs play back too (every frame + its
-  timing is decoded here and uploaded, up to 40 frames) - if your browser
-  doesn't support that decoding (needs the WebCodecs <code>ImageDecoder</code>
-  API - recent Chrome/Edge do), only the first frame is used, same as a
-  still image. Select the "Image" effect above to display it.
+  a JPEG/PNG/GIF itself. Animated GIFs play back too, up to 40 frames -
+  Chrome/Edge/desktop Firefox decode every real frame and its exact timing;
+  other browsers (older Firefox, Firefox on Android, Safari) instead play
+  the GIF natively for a few seconds and record what's on screen, which
+  looks right for most animations but won't perfectly match an unusual
+  loop point or exact per-frame timing. Select the "Image" effect above to
+  display it.
 </p>
 <input type="file" id="imageFile" accept="image/*">
 <div id="imageStatus" style="font-size:0.8rem;color:#888;margin-top:0.5rem;"></div>
@@ -317,6 +319,53 @@ async function decodeAnimatedFrames(file) {
   }
 }
 
+// Universal animation fallback for browsers without ImageDecoder (notably
+// Firefox for Android, which has no WebCodecs support at all, and any
+// older browser) - every browser can animate a GIF/animated-WEBP natively
+// in an <img>, so instead of decoding the file ourselves, this plays it
+// off-screen and samples its rendered output over time via canvas,
+// collapsing consecutive identical samples into one longer-delay frame.
+// This can't recover the source's exact frame count/timing or detect its
+// natural loop point - it's a fixed-duration recording, not a decode -
+// but it plays back recognizably in literally any browser with no feature
+// dependency at all. Returns null (falls through to the plain still-frame
+// path) if the file never appears to change across the sampling window.
+async function decodeAnimatedFramesBySampling(file) {
+  const kMaxFramesClient = 40;
+  const sampleIntervalMs = 60;
+  const maxSampleDurationMs = 3000;
+  const url = URL.createObjectURL(file);
+  const img = document.createElement('img');
+  try {
+    img.src = url;
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+    // Must actually be rendered (not display:none) for most browsers to
+    // keep animating it - parked off-screen instead of made invisible.
+    img.style.position = 'fixed';
+    img.style.left = '-9999px';
+    document.body.appendChild(img);
+
+    const frames = [];
+    const start = performance.now();
+    while (performance.now() - start < maxSampleDurationMs && frames.length < kMaxFramesClient) {
+      const rgb = toRgb32x32(img);
+      const last = frames[frames.length - 1];
+      if (last && last.rgb.every((v, i) => v === rgb[i])) {
+        last.delayMs += sampleIntervalMs;
+      } else {
+        frames.push({ delayMs: sampleIntervalMs, rgb });
+      }
+      await new Promise(r => setTimeout(r, sampleIntervalMs));
+    }
+    return frames.length > 1 ? frames : null;
+  } catch (err) {
+    return null;
+  } finally {
+    if (img.parentNode) img.parentNode.removeChild(img);
+    URL.revokeObjectURL(url);
+  }
+}
+
 document.getElementById('imageFile').addEventListener('change', async e => {
   const file = e.target.files[0];
   if (!file) return;
@@ -324,6 +373,13 @@ document.getElementById('imageFile').addEventListener('change', async e => {
   try {
     imgStatus.textContent = 'decoding…';
     let frames = await decodeAnimatedFrames(file);
+    // Only worth a 3-second sampling pass for formats that can actually
+    // animate - skip it for a plain JPEG/PNG/etc, which would just burn
+    // the wait and correctly find nothing.
+    if (!frames && (file.type === 'image/gif' || file.type === 'image/webp')) {
+      imgStatus.textContent = 'detecting animation…';
+      frames = await decodeAnimatedFramesBySampling(file);
+    }
     if (!frames) {
       const bitmap = await createImageBitmap(file);
       frames = [{ delayMs: 0, rgb: toRgb32x32(bitmap) }];
