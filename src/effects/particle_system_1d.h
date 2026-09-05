@@ -7,10 +7,15 @@
 
 // Port of real WLED's ParticleSystem1D (wled00/FXparticleSystem.h/.cpp,
 // https://github.com/wled/WLED, by Damian Schneider "DedeHai") onto this
-// board's fixed 32-wide "compute one column, broadcast it down every row
-// via fill_column()" 1D convention (see effects.h's top comment - every
-// de facto 1D effect in this codebase already works this way since there
-// is no separate 1D strip, only one row of the 32x32 matrix used as one).
+// board's fixed 32-wide "strip" - one row of the 32x32 matrix, since there
+// is no separate 1D strip. Unlike every *classic* de facto 1D effect in
+// this codebase (chases, twinkles, ...), which broadcast their computed
+// color down every row via fill_column() to fill the whole matrix with an
+// ambient pattern (see effects.h's top comment), render() below draws onto
+// a single middle row instead and clears the rest - these effects
+// represent discrete objects (balls, sparks, sand grains) that are
+// supposed to look small, and broadcasting them down all 32 rows turns
+// every particle into a full-height bar instead of a ball.
 //
 // ParticleSystem2D is being ported separately into its own
 // particle_system_2d.h/.cpp - nothing here references it, and every type
@@ -159,10 +164,10 @@ void set_palette_colors(uint8_t palette_id, Rgb primary, Rgb secondary, Rgb tert
 void update();
 
 // Real WLED's ParticleSystem1D::render(): resolves current particle state
-// into one color per column (0..kStripLength-1) and broadcasts each down
-// every row via fill_column() - see this file's top comment and
-// effects.h's "Where this strip lives" convention every de facto 1D
-// effect in this codebase already follows.
+// into one color per column (0..kStripLength-1) and draws it onto a single
+// middle row of `frame`, clearing the rest - see this file's top comment
+// for why (unlike classic 1D effects, these represent small discrete
+// objects, not an ambient pattern meant to fill the whole matrix).
 void render(Frame frame);
 
 // -- emitters ---------------------------------------------------------
