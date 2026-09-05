@@ -15,7 +15,13 @@ constexpr int kW = GuDisplay::WIDTH;
 constexpr int kH = GuDisplay::HEIGHT;
 
 struct BeachState {
-  uint8_t wet[kW];  // per-column wetness, 255=freshly washed, decays toward 0
+  // Per-column "high-water mark": how many logical rows past sand_top the
+  // wave has recently reached (Q4 fixed-point, so it can shrink smoothly
+  // rather than in whole-row jumps). Rows within this mark are wet, rows
+  // beyond it stay dry - a single per-column opacity value here instead
+  // would wet the *entire* column uniformly the instant any wave touched
+  // it at all, including sand far past where the water actually reached.
+  uint16_t wet_depth_q4[kW];
 };
 static_assert(sizeof(BeachState) <= State::kDataSize, "BeachState too big");
 
@@ -49,7 +55,7 @@ void mode_beach_waves(uint32_t now_ms, const Params &p, State &state, Frame fram
   uint8_t raw = sin8(phase255);
   int surge = (raw > 128) ? ((raw - 128) * state.aux0) / 127 : 0;
 
-  uint8_t decay = static_cast<uint8_t>(1 + ((255 - p.custom2) >> 5));
+  uint16_t decay_q4 = static_cast<uint16_t>(1 + ((255 - p.custom2) >> 3));
 
   // Custom3: how thick the foam band at the wave's leading edge is - a
   // thin crisp line at 0, a wide frothy band at 255.
@@ -73,11 +79,22 @@ void mode_beach_waves(uint32_t now_ms, const Params &p, State &state, Frame fram
     if (front < 0) front = 0;
     if (front > kH) front = kH;
 
-    bool washed = surge > 1;
+    // How far past sand_top this wave currently reaches, in logical rows -
+    // extends the high-water mark immediately when a wave washes further
+    // than it, otherwise lets it shrink back a little each frame. Measured
+    // to the far edge of the foam band, not just `front` itself, or the
+    // sand immediately next to currently-visible foam would read as dry.
+    int reach = front + foam_thickness - sand_top;
+    if (reach < 0) reach = 0;
+    auto reach_q4 = static_cast<uint16_t>(reach << 4);
     if (p.option1) {
-      s.wet[x] = washed ? 255 : qsub8(s.wet[x], decay);
+      if (reach_q4 > s.wet_depth_q4[x]) {
+        s.wet_depth_q4[x] = reach_q4;
+      } else {
+        s.wet_depth_q4[x] = (s.wet_depth_q4[x] > decay_q4) ? static_cast<uint16_t>(s.wet_depth_q4[x] - decay_q4) : 0;
+      }
     } else {
-      s.wet[x] = 0;
+      s.wet_depth_q4[x] = 0;
     }
 
     // Rendered in logical rows - 0 is always "deep sea", kH-1 is always
@@ -93,10 +110,25 @@ void mode_beach_waves(uint32_t now_ms, const Params &p, State &state, Frame fram
       } else if (logical_y < front + foam_thickness) {
         frame[y][x] = kFoam;  // the wave's leading edge
       } else {
+        // This row is wet only if the high-water mark actually reaches
+        // this far past sand_top - not just because *some* row in this
+        // column got washed - with one row of soft fade at the edge
+        // rather than a hard cutoff.
+        int depth_into_sand = logical_y - sand_top;
+        uint16_t depth_q4 = static_cast<uint16_t>(depth_into_sand << 4);
+        uint8_t wet_amount;
+        if (depth_q4 >= s.wet_depth_q4[x]) {
+          wet_amount = 0;
+        } else if (s.wet_depth_q4[x] - depth_q4 >= 16) {
+          wet_amount = 255;
+        } else {
+          wet_amount = static_cast<uint8_t>((s.wet_depth_q4[x] - depth_q4) << 4);
+        }
+
         // Cheap fixed noise texture (a hash of the coordinates, not
         // randomized per frame) so the sand isn't a flat block of color.
         uint8_t speckle = static_cast<uint8_t>((x * 37 + logical_y * 17) & 0x0F);
-        Rgb sand = blend(kDrySand, kWetSand, s.wet[x]);
+        Rgb sand = blend(kDrySand, kWetSand, wet_amount);
         sand.r = qsub8(sand.r, speckle >> 2);
         sand.g = qsub8(sand.g, speckle >> 3);
         frame[y][x] = sand;
