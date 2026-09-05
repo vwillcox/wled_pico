@@ -16,7 +16,7 @@ namespace {
 
 constexpr int kW = GuDisplay::WIDTH;
 constexpr int kH = GuDisplay::HEIGHT;
-constexpr int kMaxBubbles = 6;
+constexpr int kMaxBubbles = 20;
 
 struct Bubble {
   uint8_t x;
@@ -123,14 +123,26 @@ void mode_bathtub_fill(uint32_t now_ms, const Params &p, State &state, Frame fra
   }
 
   // Bubbles fizz up from the tub floor while there's enough water to
-  // plausibly hold them, spawning at a rate set by Custom1.
+  // plausibly hold them. Custom1 caps how many are active at once (1..20)
+  // rather than just nudging the spawn chance within a small fixed pool -
+  // that made the slider barely visible, since a handful of slots fill up
+  // almost immediately regardless of the chance per frame. Capping the
+  // count directly instead makes low settings read as "the occasional
+  // bubble" and high settings as "fizzing", a real difference across the
+  // slider's range.
+  int bubble_limit = 1 + (static_cast<int>(p.custom1) * (kMaxBubbles - 1)) / 255;
   if (filled_rows > 4) {
+    int active_count = 0;
+    for (const auto &b : s.bubbles)
+      if (b.active) active_count++;
+
     for (auto &b : s.bubbles) {
       if (!b.active) {
-        if (random8() < static_cast<uint8_t>(2 + (p.custom1 >> 4))) {
+        if (active_count < bubble_limit && random8() < 50) {
           b.active = true;
           b.x = random8(static_cast<uint8_t>(kW));
           b.y = static_cast<float>(kH - 1);
+          active_count++;
         }
         continue;
       }
