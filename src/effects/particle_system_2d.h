@@ -295,10 +295,14 @@ void set_used_particles(uint8_t percentage);  // 255 == 100% of kMaxParticles
 void set_collision_hardness(uint8_t hardness);
 void set_wall_hardness(uint8_t hardness);
 void set_wall_roughness(uint8_t roughness);
-// Real WLED's setMatrixSize(): recomputes max_x/max_y from a pixel size.
-// This board is always 32x32 (max_x/max_y are set to that in begin() and
-// never need to change), but kept for call-site parity / in case an effect
-// wants to run the physics over a sub-region of the matrix.
+// Real WLED's setMatrixSize(): recomputes max_x/max_y (physics bounds, in
+// sub-pixel units) from a pixel size. Kept for call-site parity with real
+// WLED's own updateSystem()/constructor, but unlike real WLED, the
+// rendering pixel bounds (render()'s kMaxXPixel/kMaxYPixel, always
+// GuDisplay::WIDTH-1/HEIGHT-1) do NOT follow this call - this board's
+// framebuffer is always exactly 32x32. Calling this with anything other
+// than (32, 32) shrinks/grows where particles are allowed to move without
+// changing where they can actually be drawn, so don't.
 void set_matrix_size(uint32_t x, uint32_t y);
 void set_wrap_x(bool enable);
 void set_wrap_y(bool enable);
