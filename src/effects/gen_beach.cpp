@@ -44,6 +44,10 @@ void mode_beach_waves(uint32_t now_ms, const Params &p, State &state, Frame fram
 
   uint8_t decay = static_cast<uint8_t>(1 + ((255 - p.custom2) >> 5));
 
+  // Custom3: how thick the foam band at the wave's leading edge is - a
+  // thin crisp line at 0, a wide frothy band at 255.
+  int foam_thickness = 1 + (p.custom3 >> 6);  // 1..4 rows
+
   constexpr Rgb kDeepSea{6, 45, 95};
   constexpr Rgb kShallowSea{50, 150, 175};
   constexpr Rgb kFoam{230, 248, 250};
@@ -69,16 +73,22 @@ void mode_beach_waves(uint32_t now_ms, const Params &p, State &state, Frame fram
       s.wet[x] = 0;
     }
 
-    for (int y = 0; y < kH; y++) {
-      if (y < front) {
-        uint8_t frac = front > 0 ? static_cast<uint8_t>((y * 255) / front) : 0;
+    // Rendered in logical rows - 0 is always "deep sea", kH-1 is always
+    // "furthest onto dry sand" - then mapped onto the real screen row last,
+    // flipped when Option3 is set so the sea ends up at the bottom of the
+    // matrix and the sand at the top instead of the default sea-top/
+    // sand-bottom layout.
+    for (int logical_y = 0; logical_y < kH; logical_y++) {
+      int y = p.option3 ? (kH - 1 - logical_y) : logical_y;
+      if (logical_y < front) {
+        uint8_t frac = front > 0 ? static_cast<uint8_t>((logical_y * 255) / front) : 0;
         frame[y][x] = blend(kDeepSea, kShallowSea, frac);
-      } else if (y < front + 1) {
+      } else if (logical_y < front + foam_thickness) {
         frame[y][x] = kFoam;  // the wave's leading edge
       } else {
         // Cheap fixed noise texture (a hash of the coordinates, not
         // randomized per frame) so the sand isn't a flat block of color.
-        uint8_t speckle = static_cast<uint8_t>((x * 37 + y * 17) & 0x0F);
+        uint8_t speckle = static_cast<uint8_t>((x * 37 + logical_y * 17) & 0x0F);
         Rgb sand = blend(kDrySand, kWetSand, s.wet[x]);
         sand.r = qsub8(sand.r, speckle >> 2);
         sand.g = qsub8(sand.g, speckle >> 3);
