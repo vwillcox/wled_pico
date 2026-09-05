@@ -115,19 +115,37 @@ Assistant's client library (`frenck/python-wled`), not guessed at:
 
 ## Effects library
 
-156 of real WLED's 219 numbered effects are ported (`src/effects/effects.cpp`
-plus `src/effects/gen_batch0.cpp`-`gen_batch8.cpp`), each citing the exact
-WLED source function/line it came from — every hardware-feasible effect
-except one (2D scrolling text, below). Effect IDs match real WLED's
+178 of real WLED's 219 numbered effects are ported, each citing the exact
+WLED source function/line it came from. Effect IDs match real WLED's
 `FX_MODE_*` numbering exactly, not porting order — see `effects.h`'s top
 comment. Not ported, by design:
 
-- **Audio-reactive effects** (~40) — this board has no microphone.
-- **Particle System effects** (~35) — real WLED's own particle-physics
-  engine (gravity, collisions, per-particle state) is a substantial
-  subsystem in its own right, out of scope here.
+- **Audio-reactive effects** (~40, including 9 that are also Particle
+  System effects) — this board has no microphone.
 - **2D scrolling text** (id 122) — needs WLED's font/glyph-rendering
   subsystem, which nothing in this firmware provides.
+
+That's every hardware-feasible effect covered, including the Particle
+System:
+
+- **156 classic effects** (`src/effects/effects.cpp` plus
+  `src/effects/gen_batch0.cpp`-`gen_batch8.cpp`).
+- **22 Particle System effects** (`src/effects/gen_particles_2d.cpp` /
+  `gen_particles_1d.cpp`, ids 187-217 — Volcano, Fire, Fireworks, Vortex,
+  Fuzzy Noise, Ballpit, Box, Impact, Waterfall, Ghost Rider, Galaxy, and
+  the 1D-strip ones DripDrop, Pinball, Dancing Shadows, Fireworks 1D,
+  Sparkler, Hourglass, Spray 1D, 1D Balance, Chase, Starburst, Fire 1D),
+  built on a faithful port of real WLED's actual particle-physics engine
+  (`src/effects/particle_system_2d.h`/`.cpp`,
+  `particle_system_1d.h`/`.cpp`) — sub-pixel positions, gravity, friction,
+  per-axis wall bounce/wrap, particle-particle collisions with hardness,
+  anti-aliased rendering, motion/smear blur, all ported from
+  `wled00/FXparticleSystem.h`/`.cpp` rather than approximated. The 1D
+  engine maps each particle's strip position onto its own full-width row
+  (real WLED's own default 1D-onto-2D-matrix mapping,
+  `Segment::setPixelColor()`'s `M12_pBar` case) rather than a single line,
+  so multiple particles show as multiple independent horizontal bars, each
+  bouncing on its own — not one shared line.
 
 A full 72-palette engine (`src/effects/palettes.h`/`.cpp`) backs every
 effect that keys off `SEGMENT.palette` in the original — all 59 built-in
@@ -136,12 +154,18 @@ ones, ported from WLED's actual palette data (not approximated).
 
 All 219 effect IDs (0-219, the 4 genuinely-retired "RSVD" ones included)
 have been cycled live against real hardware over the JSON API with no
-crashes or watchdog resets. That confirms memory/bounds safety across the
+crashes, no watchdog resets, and stable free heap throughout (checked
+again after the Particle System landed, not just once at the end of the
+classic-effects push). That confirms memory/bounds safety across the
 whole set, not that each one's visual output has been eyeballed
 individually — a handful of upstream WLED quirks were found and
 deliberately reproduced rather than "fixed" (see the per-effect comments
 for specifics), so if one looks off compared to real WLED, check there
-first before assuming a porting bug.
+first before assuming a porting bug. Two real bugs *were* found and fixed
+this way after initial porting: a `beatsin8()` phase-offset bug that broke
+every effect using it to put multiple waves out of phase (see
+`wled_compat.h`'s comment on it), and the 1D particle rendering mapping
+described above.
 
 ## Hardware
 
@@ -184,6 +208,15 @@ src/
     palettes.h / .cpp         the 72-palette engine (color_from_palette)
     gen_batch0.cpp .. gen_batch8.cpp
                               152 more ported effects, one self-contained file per batch
+    particle_system_2d.h / .cpp
+                              real WLED's 2D particle-physics engine, ported
+    particle_system_1d.h / .cpp
+                              same, 1D (this board's 32-pixel matrix row)
+    gen_particles_2d.cpp      11 2D Particle System effects built on the engine above
+    gen_particles_1d.cpp      11 1D Particle System effects built on the engine above
+    image_data.h / .cpp       backing store for the "Image" effect - a 32x32 RGB buffer the
+                              control page fills by drawing an uploaded image onto a <canvas>
+                              (browser handles JPEG/PNG/GIF decoding) and POSTing the raw pixels
   net/
     captive_portal.h / .cpp   WiFi AP + wildcard DNS + the served control page
     device_id.h / .cpp        shared colon-free/lowercase MAC helper (mDNS TXT, /json/info)
@@ -192,6 +225,7 @@ src/
     json_api.h / .cpp         WLED-shaped /json/state, /json/info, /json/effects, /json/palettes
     preset_store.h / .cpp     LittleFS-backed presets.json (WLED preset shape, trimmed)
     ota.h / .cpp              POST /update - web-based firmware upload via arduino-pico's Update class
+    image_upload.h / .cpp     POST /image - raw pixels for the "Image" effect (see image_data.h above)
 ```
 
 ## Credits
@@ -215,6 +249,17 @@ per-function comments in that file for exact line references. The other
 (`palettes.cpp`) are ported the same way - each function/table cites its
 exact WLED source location - see "Effects library" above for what's
 deliberately not included and why.
+
+`effects/particle_system_2d.h`/`.cpp` and `particle_system_1d.h`/`.cpp` are
+ports of WLED's `wled00/FXparticleSystem.h`/`.cpp`, by Damian Schneider
+("DedeHai") — the sub-pixel movement, gravity/friction/force, wall bounce/
+wrap, particle-particle collision, and anti-aliased rendering math is
+carried over faithfully; only the memory model changes (fixed static pools
+sized for this board instead of WLED's runtime-sized shared-memory
+slicing) and the white channel is dropped (this board's LEDs are plain
+RGB). `gen_particles_2d.cpp`/`gen_particles_1d.cpp`'s 22 effects are
+ported from `FX.cpp`'s `mode_particle*` functions the same way as every
+other effect here.
 
 `api/json_api.cpp`'s `/json/state` and `/json/info` field names and shapes
 are matched against `wled00/json.cpp`'s `serializeState()`/
