@@ -1,5 +1,20 @@
 # wled_pico
 
+> **This is a vibe-coded, AI-assisted translation of [WLED](https://github.com/wled/WLED)
+> onto different hardware — not an official WLED project, not affiliated
+> with or endorsed by WLED or its maintainers.** Nearly all of the effect
+> math, the JSON API shape, and the palette data are WLED's own work
+> (Copyright the WLED project and its contributors, primarily Christian
+> Schwinne and Damian Schneider "DedeHai" for the effects/particle-system
+> algorithms this ports — see individual source file headers and
+> [Credits](#credits) below for exactly what came from where); what's new
+> here is retargeting that onto an RP2040 driving a Pimoroni Cosmic
+> Unicorn matrix, done almost entirely by Claude (Anthropic) acting on the
+> repo owner's direction and review, not hand-written line-by-line. Bugs
+> introduced in translation are this project's, not WLED's — see
+> [LICENSE](./LICENSE) (EUPL v1.2, the same license WLED itself uses) for
+> the full terms and copyright notices.
+
 A WLED-*inspired* firmware for the Pimoroni Cosmic Unicorn (Pico W). Not a
 literal port of [WLED](https://github.com/wled/WLED) — WLED's codebase
 assumes an ESP8266/ESP32 + NeoPixelBus/FastLED stack that doesn't apply to
