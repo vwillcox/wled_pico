@@ -252,7 +252,16 @@ enum class Id : uint8_t {
   kParticlegalaxy = 217,
   kColorclouds = 218,
   kSlowTransition = 219,
-  kCount = 220,
+
+  // Original effects with no real WLED counterpart - not part of the
+  // FX_MODE_* numbering above, so given IDs past its end (220+) rather
+  // than reusing a "RSVD" slot, which would make a real WLED client
+  // misreport a real, rendering effect as reserved/nonexistent (see this
+  // file's top comment on why the numbering below 220 has to stay exactly
+  // real WLED's own). See gen_bathtub.cpp / gen_beach.cpp.
+  kBathtubFill = 220,
+  kBeachWaves = 221,
+  kCount = 222,
 };
 
 struct Params {
