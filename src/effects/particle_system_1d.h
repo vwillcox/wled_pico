@@ -233,5 +233,13 @@ extern uint32_t used_particles;  // WLED's usedParticles
 extern uint32_t num_sources;     // WLED's numSources - defaults to kMaxSources in begin(), lower to use fewer
 extern int32_t max_x;            // WLED's maxX: kStripLength*kRadius - 1, this strip's fixed sub-pixel bound
 
+// WLED's perParticleSize - a public member there too (not gated behind a
+// setter), toggled directly by effects like Pinball to switch per-particle
+// sizing on/off mid-effect based on a live parameter. begin(advanced) seeds
+// this to `advanced` (matching WLED's own advanced-implies-per-particle-
+// size default), but it can be reassigned any time after - set_particle_size()
+// is the only other thing that touches it (always clears it to false).
+extern bool per_particle_size;
+
 }  // namespace ps1d
 }  // namespace effects

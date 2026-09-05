@@ -65,6 +65,7 @@ AdvancedParticle adv_particles[kMaxParticles];
 uint32_t used_particles = kMaxParticles;
 uint32_t num_sources = kMaxSources;
 int32_t max_x = static_cast<int32_t>(kStripLength * static_cast<uint32_t>(kRadius)) - 1;
+bool per_particle_size = false;  // WLED's perParticleSize (public there too - see header)
 
 namespace {
 
@@ -82,7 +83,6 @@ uint8_t motion_blur_ = 0;                     // WLED's motionBlur
 uint8_t smear_blur_ = 0;                      // WLED's smearBlur
 uint32_t emit_index_ = 0;                     // WLED's emitIndex
 uint32_t collision_start_idx_ = 0;            // WLED's collisionStartIdx
-bool per_particle_size_ = false;              // WLED's perParticleSize
 bool advanced_enabled_ = false;               // stands in for WLED's `advPartProps != nullptr`
 
 // update()'s stand-in for WLED's SEGMENT.call - collideParticles() reads
@@ -232,7 +232,7 @@ void render_large_particle(Rgb (&buf)[kStripLength], uint32_t size, uint32_t idx
 
 void render_particle(Rgb (&buf)[kStripLength], uint32_t idx, uint8_t brightness, const Rgb &color, bool wrap) {
   uint32_t size = particle_size_;
-  if (per_particle_size_ && advanced_enabled_) size = 1u + adv_particles[idx].size;  // +1: collisions don't support single-pixel size
+  if (per_particle_size && advanced_enabled_) size = 1u + adv_particles[idx].size;  // +1: collisions don't support single-pixel size
 
   if (size == 0) {  // single pixel particle - can be out of bounds, oob checking is done for 2-pixel particles
     int32_t xi = particles[idx].x >> kRadiusShift;
@@ -346,7 +346,7 @@ void apply_gravity_all() {
 void collide_particles(uint32_t idx1, uint32_t idx2, int32_t dx, uint32_t collisiondistance) {
   int32_t massratio1 = 0;  // 0 means don't use a mass ratio (equal mass)
   int32_t massratio2 = 0;
-  if (per_particle_size_ && advanced_enabled_) {
+  if (per_particle_size && advanced_enabled_) {
     collisiondistance = static_cast<uint32_t>(kMinHardRadius * 2) +
                          (((static_cast<uint32_t>(adv_particles[idx1].size) + adv_particles[idx2].size) * 52) >> 6);
     uint32_t mass1 = static_cast<uint32_t>(kRadius) + adv_particles[idx1].size;
@@ -433,12 +433,12 @@ void collide_particles(uint32_t idx1, uint32_t idx2, int32_t dx, uint32_t collis
 void handle_collisions() {
   uint32_t collisiondistance = static_cast<uint32_t>(particle_hard_radius_) << 1;
   uint32_t check_dist = std::max<uint32_t>(2u * kMaxSpeed, collisiondistance);
-  if (per_particle_size_ && advanced_enabled_) check_dist = std::max<uint32_t>(2u * kMaxSpeed, (512u * 52u) >> 6);
+  if (per_particle_size && advanced_enabled_) check_dist = std::max<uint32_t>(2u * kMaxSpeed, (512u * 52u) >> 6);
   uint32_t check_dist_sq = check_dist * check_dist;
 
   int32_t bin_width = 64 * kRadius;
   int32_t overlap = static_cast<int32_t>(collisiondistance) + (2 * kMaxSpeed);
-  if (per_particle_size_ && advanced_enabled_) overlap = 512;  // 2 * max radius
+  if (per_particle_size && advanced_enabled_) overlap = 512;  // 2 * max radius
 
   uint32_t max_bin_particles = std::max<uint32_t>(50u, (used_particles + 1) / 4);
   uint32_t num_bins = static_cast<uint32_t>((max_x + (bin_width - 1)) / bin_width);
@@ -516,7 +516,7 @@ void begin(bool advanced) {
   gforce_counter_ = 0;
   frame_counter_ = 0;
 
-  per_particle_size_ = advanced;  // enabled by default for advanced systems so FX don't need to set it explicitly
+  per_particle_size = advanced;  // enabled by default for advanced systems so FX don't need to set it explicitly
   advanced_enabled_ = advanced;
 
   palette_id_ = 0;
@@ -539,7 +539,7 @@ void update() {
 
   if (settings_.useCollisions) {
     handle_collisions();
-    if (per_particle_size_) handle_collisions();  // second pass helps small/large-particle "slip through"
+    if (per_particle_size) handle_collisions();  // second pass helps small/large-particle "slip through"
   }
 
   for (uint32_t i = 0; i < used_particles; i++) {
@@ -620,7 +620,7 @@ void particle_move_update(Particle &part, ParticleFlags &part_flags, const Setti
   int32_t newX = part.x + static_cast<int32_t>(part.vx);
   part_flags.outofbounds = false;  // reset (particle may have been created outside the strip and is now moving into view)
 
-  if (per_particle_size_ && advanced_properties != nullptr) {
+  if (per_particle_size && advanced_properties != nullptr) {
     renderradius = kHalfRadius - 1 + advanced_properties->size;
     if (advanced_properties->size > 1)
       particle_hard_radius_ = kMinHardRadius + ((static_cast<int32_t>(advanced_properties->size) * 52) >> 6);
@@ -723,7 +723,7 @@ void set_smear_blur(uint8_t blur_amount) { smear_blur_ = blur_amount; }
 void set_particle_size(uint8_t size) {
   particle_size_ = size;
   particle_hard_radius_ = kMinHardRadius;  // ~1 pixel
-  per_particle_size_ = false;              // disable per-particle size control if global size is set
+  per_particle_size = false;              // disable per-particle size control if global size is set
   if (particle_size_ > 1) {
     particle_hard_radius_ = kMinHardRadius + ((static_cast<int32_t>(particle_size_) * 52) >> 6);
   } else if (particle_size_ == 0) {
