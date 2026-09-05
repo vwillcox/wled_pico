@@ -221,9 +221,9 @@ src/
     font_tom_thumb.h          embedded 3x6px bitmap font (real WLED's own default)
     gen_scrolltext.cpp        the "Scrolling Text" effect, built on the font above
     image_data.h / .cpp       backing store for the "Image" effect - up to 40 32x32 RGB frames
-                              (animation included) the control page decodes in-browser - exact
-                              per-frame decode via WebCodecs ImageDecoder where supported, a
-                              universal record-the-native-animation fallback otherwise - and uploads raw
+                              (animation included) the control page decodes in-browser via its own
+                              from-scratch GIF87a/89a + LZW parser (no browser decode API dependency,
+                              so it behaves identically everywhere) and uploads the raw frames
   net/
     captive_portal.h / .cpp   WiFi AP + wildcard DNS + the served control page
     device_id.h / .cpp        shared colon-free/lowercase MAC helper (mDNS TXT, /json/info)
