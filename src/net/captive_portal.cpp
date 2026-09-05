@@ -111,7 +111,11 @@ const char kIndexHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
 <p style="font-size:0.8rem;color:#888;">
   Any image file - it's resized to 32x32 right here in the browser (stretched
   to fill, not cropped) before uploading, so this device never has to decode
-  a JPEG/PNG/GIF itself. Select the "Image" effect above to display it.
+  a JPEG/PNG/GIF itself. Animated GIFs play back too (every frame + its
+  timing is decoded here and uploaded, up to 40 frames) - if your browser
+  doesn't support that decoding (needs the WebCodecs <code>ImageDecoder</code>
+  API - recent Chrome/Edge do), only the first frame is used, same as a
+  still image. Select the "Image" effect above to display it.
 </p>
 <input type="file" id="imageFile" accept="image/*">
 <div id="imageStatus" style="font-size:0.8rem;color:#888;margin-top:0.5rem;"></div>
@@ -259,25 +263,86 @@ for (let i = 1; i <= 8; i++) {
   saveDiv.appendChild(s);
 }
 
+// Draws `source` (an ImageBitmap or a decoded ImageDecoder VideoFrame) onto
+// a 32x32 canvas and returns its pixels as a plain RGB Uint8Array (3072
+// bytes) - the browser does all the actual image-format decoding via
+// createImageBitmap()/ImageDecoder before this ever runs, so this step
+// itself is just a resize + RGBA-to-RGB strip.
+function toRgb32x32(source) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 32;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(source, 0, 0, 32, 32);
+  const rgba = ctx.getImageData(0, 0, 32, 32).data;
+  const rgb = new Uint8Array(32 * 32 * 3);
+  for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
+    rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
+  }
+  return rgb;
+}
+
+// Decodes every frame of an animated image (GIF) via the WebCodecs
+// ImageDecoder API - this is what does the actual GIF/LZW decoding, not
+// this firmware. Returns [{delayMs, rgb}, ...], or null if this browser
+// doesn't support ImageDecoder, the file isn't multi-frame, or decoding
+// otherwise fails (caller falls back to a single still frame either way).
+// kMaxFramesClient must match effects::kMaxFrames (image_data.h) - kept in
+// sync by comment, not code.
+async function decodeAnimatedFrames(file) {
+  const kMaxFramesClient = 40;
+  if (!('ImageDecoder' in window)) return null;
+  let decoder;
+  try {
+    const buf = await file.arrayBuffer();
+    decoder = new ImageDecoder({ data: buf, type: file.type || 'image/gif' });
+    await decoder.tracks.ready;
+    const track = decoder.tracks.selectedTrack;
+    const frameCount = track ? track.frameCount : 1;
+    if (!frameCount || frameCount <= 1) return null;
+    const n = Math.min(frameCount, kMaxFramesClient);
+    const frames = [];
+    for (let i = 0; i < n; i++) {
+      const { image } = await decoder.decode({ frameIndex: i });
+      const rgb = toRgb32x32(image);
+      const delayMs = Math.max(20, Math.round((image.duration || 100000) / 1000));
+      image.close();
+      frames.push({ delayMs, rgb });
+    }
+    return frames;
+  } catch (err) {
+    return null;  // fall back to the still-frame path
+  } finally {
+    if (decoder) decoder.close();
+  }
+}
+
 document.getElementById('imageFile').addEventListener('change', async e => {
   const file = e.target.files[0];
   if (!file) return;
   const imgStatus = document.getElementById('imageStatus');
   try {
-    imgStatus.textContent = 'resizing…';
-    const bitmap = await createImageBitmap(file);
-    const canvas = document.createElement('canvas');
-    canvas.width = 32;
-    canvas.height = 32;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(bitmap, 0, 0, 32, 32);
-    const rgba = ctx.getImageData(0, 0, 32, 32).data;
-    const rgb = new Uint8Array(32 * 32 * 3);
-    for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
-      rgb[j] = rgba[i]; rgb[j + 1] = rgba[i + 1]; rgb[j + 2] = rgba[i + 2];
+    imgStatus.textContent = 'decoding…';
+    let frames = await decodeAnimatedFrames(file);
+    if (!frames) {
+      const bitmap = await createImageBitmap(file);
+      frames = [{ delayMs: 0, rgb: toRgb32x32(bitmap) }];
     }
-    imgStatus.textContent = 'uploading…';
-    await fetch('/image', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: rgb });
+
+    const header = new Uint8Array(2 + frames.length * 2);
+    header[0] = frames.length & 0xFF;
+    header[1] = (frames.length >> 8) & 0xFF;
+    frames.forEach((f, i) => {
+      header[2 + i * 2] = f.delayMs & 0xFF;
+      header[2 + i * 2 + 1] = (f.delayMs >> 8) & 0xFF;
+    });
+    const payload = new Uint8Array(header.length + frames.length * 32 * 32 * 3);
+    payload.set(header, 0);
+    let off = header.length;
+    for (const f of frames) { payload.set(f.rgb, off); off += f.rgb.length; }
+
+    imgStatus.textContent = `uploading ${frames.length} frame${frames.length > 1 ? 's' : ''}…`;
+    await fetch('/image', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: payload });
     imgStatus.textContent = 'done - select the Image effect above to view it';
   } catch (err) {
     imgStatus.textContent = 'failed: ' + err;

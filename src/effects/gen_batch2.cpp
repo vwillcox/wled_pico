@@ -686,10 +686,12 @@ EFFECTS_REGISTER(Id::kRunningDual, mode_running_dual)
 // WLED_ENABLE_GIF (filesystem-backed storage + a GIF decoder), which this
 // firmware doesn't have. Instead of porting a GIF decoder onto an RP2040,
 // image_data.h pushes the decode work onto the browser (see its own top
-// comment) and hands back a plain 32x32 RGB buffer - display that if one's
-// been uploaded, otherwise fall back to Solid, matching upstream's own
+// comment) - including animation, decoded frame-by-frame there - and hands
+// back a plain 32x32 RGB buffer per frame; display that if one's been
+// uploaded, otherwise fall back to Solid, matching upstream's own
 // FX_FALLBACK_STATIC behavior when WLED_ENABLE_GIF isn't compiled in.
-void mode_image(uint32_t, const Params &p, State &, Frame frame) {
+void mode_image(uint32_t now_ms, const Params &p, State &state, Frame frame) {
+  update_animation(now_ms, state.call == 0);
   if (!has_image()) {
     for (int x = 0; x < GuDisplay::WIDTH; x++) fill_column(frame, x, p.primary);
     return;
